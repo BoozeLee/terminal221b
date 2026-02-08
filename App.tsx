@@ -1,20 +1,23 @@
+// Main App Entry Point
+
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ChatScreen } from './src/screens/Chat/ChatScreen';
+import { useChatStore } from './src/store/chatStore';
 
 export default function App() {
+  const { loadFromStorage } = useChatStore();
+
+  useEffect(() => {
+    // Load persisted data on app start
+    loadFromStorage();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <StatusBar style="light" backgroundColor="#0F1419" />
+      <ChatScreen />
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
