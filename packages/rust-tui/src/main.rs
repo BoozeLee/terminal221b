@@ -16,13 +16,15 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+
+mod session;
 
 const MAX_FILES: usize = 80;
 const MAX_FILE_BYTES: u64 = 32_000;
@@ -59,7 +61,7 @@ struct Message {
 
 struct App {
     root: PathBuf,
-    input: String,
+    input: PromptBuffer,
     messages: Vec<Message>,
     status: String,
     pending: bool,
@@ -69,6 +71,131 @@ struct App {
     rx: Receiver<WorkerResult>,
     tx: Sender<WorkerResult>,
     should_quit: bool,
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+struct PromptBuffer {
+    text: String,
+    cursor: usize,
+    preferred_column: Option<usize>,
+}
+
+impl PromptBuffer {
+    fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+        self.preferred_column = None;
+    }
+
+    fn insert(&mut self, character: char) {
+        self.text.insert(self.cursor, character);
+        self.cursor += character.len_utf8();
+        self.preferred_column = None;
+    }
+
+    fn backspace(&mut self) {
+        if let Some((start, _)) = self.text[..self.cursor].char_indices().next_back() {
+            self.text.drain(start..self.cursor);
+            self.cursor = start;
+        }
+        self.preferred_column = None;
+    }
+
+    fn delete(&mut self) {
+        if let Some(character) = self.text[self.cursor..].chars().next() {
+            let end = self.cursor + character.len_utf8();
+            self.text.drain(self.cursor..end);
+        }
+        self.preferred_column = None;
+    }
+
+    fn move_left(&mut self) {
+        if let Some((start, _)) = self.text[..self.cursor].char_indices().next_back() {
+            self.cursor = start;
+        }
+        self.preferred_column = None;
+    }
+
+    fn move_right(&mut self) {
+        if let Some(character) = self.text[self.cursor..].chars().next() {
+            self.cursor += character.len_utf8();
+        }
+        self.preferred_column = None;
+    }
+
+    fn move_home(&mut self) {
+        self.cursor = self.text[..self.cursor]
+            .rfind('\n')
+            .map_or(0, |newline| newline + 1);
+        self.preferred_column = None;
+    }
+
+    fn move_end(&mut self) {
+        self.cursor = self.text[self.cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |newline| self.cursor + newline);
+        self.preferred_column = None;
+    }
+
+    fn move_vertical(&mut self, down: bool) {
+        let line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map_or(0, |newline| newline + 1);
+        let line_end = self.text[self.cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |newline| self.cursor + newline);
+        let column = *self
+            .preferred_column
+            .get_or_insert_with(|| self.text[line_start..self.cursor].chars().count());
+        let target_start = if down {
+            if line_end == self.text.len() {
+                return;
+            }
+            line_end + 1
+        } else {
+            if line_start == 0 {
+                return;
+            }
+            self.text[..line_start - 1]
+                .rfind('\n')
+                .map_or(0, |newline| newline + 1)
+        };
+        let target_end = self.text[target_start..]
+            .find('\n')
+            .map_or(self.text.len(), |newline| target_start + newline);
+        let target_column = self.text[target_start..target_end]
+            .char_indices()
+            .nth(column)
+            .map_or(target_end, |(offset, _)| target_start + offset);
+        self.cursor = target_column;
+    }
+
+    fn cursor_line(&self) -> usize {
+        self.text[..self.cursor].matches('\n').count()
+    }
+
+    fn cursor_column(&self) -> usize {
+        self.text[..self.cursor]
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count()
+    }
+}
+
+fn page_scroll(current: Option<u16>, page_size: u16, max_scroll: u16, older: bool) -> Option<u16> {
+    let current = current.unwrap_or_default().min(max_scroll);
+    let next = if older {
+        current.saturating_add(page_size).min(max_scroll)
+    } else {
+        current.saturating_sub(page_size)
+    };
+    (next > 0).then_some(next)
 }
 
 struct WorkerResult {
@@ -384,10 +511,10 @@ impl App {
         let (tx, rx) = mpsc::channel();
         Self {
             root,
-            input: String::new(),
+            input: PromptBuffer::default(),
             messages: vec![Message {
                 role: "system",
-                text: "Terminal221b Rust TUI. Enter sends · /help commands · /crypto toggles crypto mode · /apply <request> asks for a reviewed diff · Ctrl-C exits.".into(),
+                text: "Terminal221b Rust TUI. Enter sends · /help commands · /crypto toggles crypto mode · /apply <request> asks for a reviewed diff · /save, /sessions, /load manage local transcripts · Ctrl-C exits.".into(),
             }],
             status: "Ready".into(),
             pending: false,
@@ -401,9 +528,12 @@ impl App {
     }
 
     fn submit(&mut self) {
-        let prompt = self.input.trim().to_string();
+        if self.pending {
+            return;
+        }
+        let prompt = self.input.as_str().trim().to_string();
         self.input.clear();
-        if prompt.is_empty() || self.pending {
+        if prompt.is_empty() {
             return;
         }
         if prompt == "/quit" || prompt == "/exit" {
@@ -413,7 +543,47 @@ impl App {
         if prompt == "/help" {
             self.messages.push(Message {
                 role: "system",
-                text: "/help  show commands\n/crypto  toggle crypto-focused assistant context\n/tools  list local analyzers and chain tools\n/scan  run local heuristic scan\n/apply <request>  request a patch; inspect it and press y to apply or n to reject\n/clear  clear conversation\n/quit  exit".into(),
+                text: "/help  show commands\n/crypto  toggle crypto-focused assistant context\n/tools  list local analyzers and chain tools\n/scan  run local heuristic scan\n/apply <request>  request a patch; inspect it and press y to apply or n to reject\n/save <name>  save user/assistant turns locally\n/sessions  list saved transcripts\n/load <name>  replace the current conversation with a saved transcript\n/clear  clear conversation\n/quit  exit".into(),
+            });
+            return;
+        }
+        if let Some(name) = prompt.strip_prefix("/save ") {
+            self.save_session(name.trim());
+            return;
+        }
+        if prompt == "/save" {
+            self.messages.push(Message {
+                role: "system",
+                text: "Usage: /save <name>".into(),
+            });
+            return;
+        }
+        if prompt == "/sessions" {
+            match session::list() {
+                Ok(names) if names.is_empty() => self.messages.push(Message {
+                    role: "system",
+                    text: "No saved sessions.".into(),
+                }),
+                Ok(names) => self.messages.push(Message {
+                    role: "system",
+                    text: format!("Saved sessions: {}", names.join(", ")),
+                }),
+                Err(error) => self.messages.push(Message {
+                    role: "system",
+                    text: format!("Could not list saved sessions: {error}"),
+                }),
+            }
+            self.scroll = None;
+            return;
+        }
+        if let Some(name) = prompt.strip_prefix("/load ") {
+            self.load_session(name.trim());
+            return;
+        }
+        if prompt == "/load" {
+            self.messages.push(Message {
+                role: "system",
+                text: "Usage: /load <name>".into(),
             });
             return;
         }
@@ -508,6 +678,54 @@ impl App {
         self.scroll = None;
     }
 
+    fn save_session(&mut self, name: &str) {
+        let transcript = session::SessionTranscript::from_messages(
+            self.messages
+                .iter()
+                .map(|message| (message.role.to_string(), message.text.clone())),
+        );
+        match session::save(name, &transcript) {
+            Ok(_) => self.status = format!("Saved local session: {name}"),
+            Err(error) => {
+                self.status = format!("Session save failed: {error}");
+                self.messages.push(Message {
+                    role: "system",
+                    text: self.status.clone(),
+                });
+            }
+        }
+        self.scroll = None;
+    }
+
+    fn load_session(&mut self, name: &str) {
+        match session::load(name) {
+            Ok(transcript) => {
+                let mut messages = vec![Message {
+                    role: "system",
+                    text: "Loaded a local transcript. Workspace context is collected fresh for each request.".into(),
+                }];
+                messages.extend(transcript.messages.into_iter().map(|message| Message {
+                    role: if message.role == "you" {
+                        "you"
+                    } else {
+                        "assistant"
+                    },
+                    text: message.text,
+                }));
+                self.messages = messages;
+                self.status = format!("Loaded local session: {name}");
+            }
+            Err(error) => {
+                self.status = format!("Session load failed: {error}");
+                self.messages.push(Message {
+                    role: "system",
+                    text: self.status.clone(),
+                });
+            }
+        }
+        self.scroll = None;
+    }
+
     fn poll_worker(&mut self) {
         if let Ok(result) = self.rx.try_recv() {
             self.pending = false;
@@ -586,6 +804,100 @@ impl App {
     }
 }
 
+fn conversation_lines(messages: &[Message]) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for message in messages {
+        let (label, color) = match message.role {
+            "you" => ("you", Color::Green),
+            "assistant" => ("221b", Color::Cyan),
+            _ => ("info", Color::Yellow),
+        };
+        lines.push(Line::from(Span::styled(
+            format!("── {label} ─────────────────────────────────────────"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )));
+        lines.extend(message.text.lines().map(|line| Line::raw(line.to_string())));
+        lines.push(Line::from(""));
+    }
+    lines
+}
+
+fn conversation_scroll_limits(messages: &[Message], area: Rect) -> (u16, u16) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(5),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let conversation = sections[1];
+    let visible_height = conversation.height.saturating_sub(2) as usize;
+    let width = conversation.width.saturating_sub(2).max(1) as usize;
+    let rendered_lines = conversation_lines(messages)
+        .iter()
+        .map(|line| line.width().div_ceil(width).max(1))
+        .sum::<usize>();
+    let max_scroll = rendered_lines
+        .saturating_sub(visible_height)
+        .min(u16::MAX as usize) as u16;
+    let page_size = visible_height
+        .saturating_sub(1)
+        .max(1)
+        .min(u16::MAX as usize) as u16;
+    (page_size, max_scroll)
+}
+
+fn prompt_lines(buffer: &PromptBuffer) -> Vec<Line<'static>> {
+    let cursor_line = buffer.cursor_line();
+    let cursor_column = buffer.cursor_column();
+    buffer
+        .text
+        .split('\n')
+        .enumerate()
+        .map(|(index, content)| {
+            if index != cursor_line {
+                return Line::raw(content.to_string());
+            }
+            let mut spans = Vec::new();
+            if let Some((cursor_byte, character)) = content.char_indices().nth(cursor_column) {
+                spans.push(Span::raw(content[..cursor_byte].to_string()));
+                spans.push(Span::styled(
+                    character.to_string(),
+                    Style::default().fg(Color::Black).bg(Color::Gray),
+                ));
+                let after = cursor_byte + character.len_utf8();
+                spans.push(Span::raw(content[after..].to_string()));
+            } else {
+                spans.push(Span::raw(content.to_string()));
+                spans.push(Span::styled(
+                    " ",
+                    Style::default().fg(Color::Black).bg(Color::Gray),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn wrapped_line_count(text: &str, width: usize) -> usize {
+    Line::raw(text.to_string())
+        .width()
+        .div_ceil(width.max(1))
+        .max(1)
+}
+
+fn prompt_cursor_visual_row(buffer: &PromptBuffer, width: usize) -> usize {
+    let mut lines = buffer.text[..buffer.cursor].split('\n').collect::<Vec<_>>();
+    let current_line = lines.pop().unwrap_or_default();
+    let preceding_rows = lines
+        .into_iter()
+        .map(|line| wrapped_line_count(line, width))
+        .sum::<usize>();
+    preceding_rows + Line::raw(current_line.to_string()).width() / width.max(1)
+}
+
 fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -616,42 +928,20 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
     );
     frame.render_widget(title, chunks[0]);
 
-    let mut lines = Vec::new();
-    for message in &app.messages {
-        let (label, color) = match message.role {
-            "you" => ("you", Color::Green),
-            "assistant" => ("221b", Color::Cyan),
-            _ => ("info", Color::Yellow),
-        };
-        lines.push(Line::from(Span::styled(
-            format!("── {label} ─────────────────────────────────────────"),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )));
-        lines.extend(message.text.lines().map(Line::from));
-        lines.push(Line::from(""));
-    }
-    let area_height = chunks[1].height.saturating_sub(2) as usize;
-    let area_width = chunks[1].width.saturating_sub(2).max(1) as usize;
-    let rendered_lines = lines
-        .iter()
-        .map(|line| {
-            let width = line
-                .spans
-                .iter()
-                .map(|span| span.content.chars().count())
-                .sum::<usize>();
-            width.div_ceil(area_width).max(1)
-        })
-        .sum::<usize>();
-    let max_scroll = rendered_lines.saturating_sub(area_height) as u16;
-    let scroll = max_scroll.saturating_sub(app.scroll.unwrap_or(0));
-    let conversation = Paragraph::new(Text::from(lines))
+    let (_, max_scroll) = conversation_scroll_limits(&app.messages, frame.area());
+    let scroll = max_scroll.saturating_sub(app.scroll.unwrap_or(0).min(max_scroll));
+    let conversation = Paragraph::new(Text::from(conversation_lines(&app.messages)))
         .block(Block::default().borders(Borders::ALL).title("Conversation"))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(conversation, chunks[1]);
 
-    let input = Paragraph::new(app.input.as_str())
+    let input_visible_height = chunks[2].height.saturating_sub(2) as usize;
+    let input_width = chunks[2].width.saturating_sub(2).max(1) as usize;
+    let input_scroll = prompt_cursor_visual_row(&app.input, input_width)
+        .saturating_sub(input_visible_height.saturating_sub(1))
+        .min(u16::MAX as usize) as u16;
+    let input = Paragraph::new(Text::from(prompt_lines(&app.input)))
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -661,10 +951,11 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
                     "Prompt"
                 }),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((input_scroll, 0));
     frame.render_widget(input, chunks[2]);
     let status = Paragraph::new(format!(
-        " {}  ·  Enter send  Ctrl-C quit  /help commands ",
+        " {}  ·  Enter send  arrows edit  PgUp/PgDn scroll  Ctrl-C quit ",
         app.status
     ))
     .style(Style::default().fg(Color::DarkGray));
@@ -675,7 +966,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "Terminal221b Rust TUI\n\nUsage: terminal221b-tui [WORKSPACE]\n\nSet ANTHROPIC_API_KEY to enable chat.\nSet TERMINAL221B_MODEL to override the default model.\n\nInside the TUI: /help, /crypto, /tools, /scan, /apply <request>, /clear, /quit.\n"
+            "Terminal221b Rust TUI\n\nUsage: terminal221b-tui [WORKSPACE]\n\nSet ANTHROPIC_API_KEY to enable chat.\nSet TERMINAL221B_MODEL to override the default model.\n\nInside the TUI: /help, /crypto, /tools, /scan, /apply <request>, /save <name>, /sessions, /load <name>, /clear, /quit.\n"
         );
         return Ok(());
     }
@@ -708,22 +999,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.should_quit = true
                 }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.input.move_home()
+                }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.input.move_end()
+                }
                 KeyCode::Char('y') if app.proposal.is_some() => app.approve_patch(true),
                 KeyCode::Char('n') if app.proposal.is_some() => app.approve_patch(false),
                 KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                    app.input.push('\n')
+                    app.input.insert('\n');
+                    app.scroll = None;
                 }
                 KeyCode::Enter => app.submit(),
-                KeyCode::Backspace => {
-                    app.input.pop();
-                }
+                KeyCode::Left => app.input.move_left(),
+                KeyCode::Right => app.input.move_right(),
+                KeyCode::Up => app.input.move_vertical(false),
+                KeyCode::Down => app.input.move_vertical(true),
+                KeyCode::Home => app.input.move_home(),
+                KeyCode::End => app.input.move_end(),
+                KeyCode::Backspace => app.input.backspace(),
+                KeyCode::Delete => app.input.delete(),
                 KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    app.input.push(character)
+                    app.input.insert(character);
+                    app.scroll = None;
                 }
-                KeyCode::PageUp => app.scroll = Some(app.scroll.unwrap_or(0).saturating_add(5)),
+                KeyCode::PageUp => {
+                    let (page, max) =
+                        conversation_scroll_limits(&app.messages, terminal.size()?.into());
+                    app.scroll = page_scroll(app.scroll, page, max, true);
+                }
                 KeyCode::PageDown => {
-                    let current = app.scroll.unwrap_or(0).saturating_sub(5);
-                    app.scroll = (current > 0).then_some(current);
+                    let (page, max) =
+                        conversation_scroll_limits(&app.messages, terminal.size()?.into());
+                    app.scroll = page_scroll(app.scroll, page, max, false);
                 }
                 _ => {}
             }
@@ -747,6 +1056,65 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_buffer_inserts_and_deletes_at_unicode_character_boundaries() {
+        let mut input = PromptBuffer::default();
+        for character in "aé猫".chars() {
+            input.insert(character);
+        }
+        input.move_left();
+        input.backspace();
+        assert_eq!(input.as_str(), "a猫");
+        assert_eq!(input.cursor, "a".len());
+        input.delete();
+        assert_eq!(input.as_str(), "a");
+        assert_eq!(input.cursor, 1);
+    }
+
+    #[test]
+    fn prompt_buffer_moves_across_lines_and_preserves_vertical_column() {
+        let mut input = PromptBuffer::default();
+        for character in "abcd\nxy\n1234".chars() {
+            input.insert(character);
+        }
+        input.move_vertical(false);
+        assert_eq!(&input.as_str()[input.cursor..], "\n1234");
+        input.move_vertical(false);
+        assert_eq!(input.cursor, 4);
+        input.move_vertical(true);
+        assert_eq!(input.cursor, 7);
+        input.move_vertical(true);
+        assert_eq!(input.cursor, input.as_str().len());
+        input.move_home();
+        assert_eq!(input.cursor, 8);
+        input.move_end();
+        assert_eq!(input.cursor, input.as_str().len());
+    }
+
+    #[test]
+    fn prompt_cursor_scroll_accounts_for_wrapped_and_wide_characters() {
+        let mut input = PromptBuffer::default();
+        for character in "abcdefghi\n猫猫猫".chars() {
+            input.insert(character);
+        }
+        for _ in 0..4 {
+            input.move_left();
+        }
+        assert_eq!(prompt_cursor_visual_row(&input, 4), 2);
+        input.move_vertical(true);
+        assert_eq!(prompt_cursor_visual_row(&input, 4), 4);
+    }
+
+    #[test]
+    fn conversation_page_scroll_clamps_at_both_ends() {
+        assert_eq!(page_scroll(None, 5, 12, true), Some(5));
+        assert_eq!(page_scroll(Some(10), 5, 12, true), Some(12));
+        assert_eq!(page_scroll(Some(12), 5, 12, true), Some(12));
+        assert_eq!(page_scroll(Some(12), 5, 12, false), Some(7));
+        assert_eq!(page_scroll(Some(2), 5, 12, false), None);
+        assert_eq!(page_scroll(None, 5, 0, true), None);
+    }
 
     #[test]
     fn workspace_context_skips_dotfiles_secrets_and_symlinks() {
