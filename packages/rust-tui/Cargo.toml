@@ -1,0 +1,21 @@
+[package]
+name = "terminal221b-tui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "An original local-first Rust TUI for Terminal221b"
+license = "UNLICENSED"
+
+[[bin]]
+name = "terminal221b-tui"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.30"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

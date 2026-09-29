@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createInterface } from 'node:readline/promises';
+import { spawnSync } from 'node:child_process';
 import { stdin, stdout } from 'node:process';
 import { resolve } from 'node:path';
 import { runLocalAnalyzers } from './analyzers.js';
@@ -19,6 +20,7 @@ function printHelp(): void {
 
 Usage:
   terminal221b ask [--workspace PATH] [--apply] PROMPT
+  terminal221b tui [WORKSPACE]
   terminal221b crypto ask [--workspace PATH] [--apply] PROMPT
   terminal221b security scan [--workspace PATH] [--with-gitleaks] [--with-bandit]
     [--with-semgrep] [--with-trivy] [--with-slither] [--with-cargo-audit]
@@ -192,6 +194,21 @@ async function printOmarchyPlan(args: string[]): Promise<void> {
   process.stdout.write(result.stdout);
 }
 
+function launchTui(args: string[]): void {
+  const result = spawnSync('terminal221b-tui', args, {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.error) {
+    throw new Error(
+      `Could not start the Rust TUI (${result.error.message}); install terminal221b-tui and ensure it is on PATH`
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(`Rust TUI exited with status ${result.status ?? 'unknown'}`);
+  }
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command === '--help' || command === '-h' || !command) {
@@ -199,6 +216,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === 'tools') return showTools();
+  if (command === 'tui') return launchTui(args);
   if (command === 'security') {
     if (args[0] !== 'scan') throw new Error('Usage: terminal221b security scan [--workspace PATH]');
     return runSecurityScan(args.slice(1));

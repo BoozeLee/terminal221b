@@ -16,6 +16,7 @@ Thumbs.db
 *.pyc
 __pycache__/
 node_modules/
+target/
 .expo/
 .expo-shared/
 dist/

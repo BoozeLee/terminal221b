@@ -79,13 +79,25 @@ The test validates request headers, model and token defaults, and error handling
 
 ## Terminal CLI
 
-The separate `@terminal221b/cli` workspace builds the `terminal221b` command with Node.js 22 or later. It is currently an early CLI, not a full-screen terminal UI or autonomous agent.
+The `@terminal221b/cli` workspace builds the `terminal221b` command with Node.js 22 or later. The Rust workspace adds an original full-screen terminal interface using Ratatui and Crossterm.
 
 ```sh
 npm ci
 npm run build:cli
 npm run cli -- ask --workspace . "Summarize the source layout"
 ```
+
+Build and launch the Rust TUI:
+
+```sh
+cargo build --release -p terminal221b-tui
+cargo install --path packages/rust-tui --locked
+terminal221b tui .
+```
+
+The TUI supports multi-turn Anthropic chat, a crypto-focused system prompt via `/crypto`, tool discovery via `/tools`, a local analyzer run via `/scan`, and `/apply <request>` for a proposed unified diff. It previews all patch paths and diff text; press `y` to apply or `n` to reject. `Enter` submits and `Shift+Enter` inserts a line break. Set `ANTHROPIC_API_KEY` in the environment; `TERMINAL221B_MODEL` optionally selects a model. The TUI uses bounded local context and does not execute model-generated commands.
+
+The terminal interface is an actual shell TUI, so it uses Ratatui/Crossterm rather than Tauri. Tauri is a desktop-webview framework; a Tauri desktop wrapper is not part of this terminal release.
 
 The CLI reads a bounded set of text files (up to 80 files and 256 KB total), skips hidden files, symlinks, dependency/build folders, and common environment files, then sends that context and the prompt to Anthropic. Set `ANTHROPIC_API_KEY` in the shell before using it. Files leave the machine for the configured Anthropic endpoint; do not run it on a workspace you are not willing to share with that provider.
 
@@ -137,9 +149,9 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 
 ## Status and limitations
 
-- Primary language: TypeScript. The app uses Expo SDK 54, React Native, Zustand, AsyncStorage, SecureStore, and the Anthropic Messages API.
+- Primary language: TypeScript; the coding TUI is a Rust/Cargo package. The app uses Expo SDK 54, React Native, Zustand, AsyncStorage, SecureStore, and the Anthropic Messages API.
 - Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, and direct text requests.
-- Not implemented: blockchain or Solana features, remote bounty testing, an autonomous tool loop, TensorRT/local inference, a backend proxy, session-list/navigation UI, mobile model selection, streaming, or attachment handling.
+- Not implemented: blockchain or Solana transaction features, remote bounty testing, a general autonomous tool loop, TensorRT/local inference, a backend proxy, cross-run session persistence, mobile model selection, streaming, or attachment handling.
 - Chat history remains in AsyncStorage and is not encrypted. Native API keys are stored in OS secure storage. Web API keys are memory-only.
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
@@ -148,10 +160,10 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 
 ## Roadmap
 
-1. Add store tests for storage migration, key handling, and session lifecycle.
-2. Add CLI session history and a terminal interface after the one-shot workflow is stable.
-3. Expand local security analysis beyond the current heuristic checks and opt-in Gitleaks/Bandit support.
-4. Define and test local Solana/SVM development profiles; tool discovery alone does not configure or run these tools.
+1. Add persistent TUI sessions and configurable model/provider support.
+2. Add a separate Tauri desktop frontend if there is a clear desktop UX need; the shell TUI remains independent.
+3. Expand local Solana/SVM development profiles; tool discovery alone does not configure or run chain tools.
+4. Improve the TUI editor, conversation navigation, and patch review UX.
 5. Review and resolve dependency advisories without an untested Expo major upgrade.
 
 ## Support
