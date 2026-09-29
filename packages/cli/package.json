@@ -1,0 +1,22 @@
+{
+  "name": "@terminal221b/cli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Local-first Terminal221b coding assistant CLI.",
+  "type": "module",
+  "bin": {
+    "terminal221b": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/cli.js"
+  }
+}

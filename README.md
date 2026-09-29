@@ -1,7 +1,7 @@
 # Terminal221b
 
-Terminal221b is an Expo and React Native chat client that sends conversations to the Anthropic Messages API.
-It stores chat sessions locally and stores native API keys with the device secure-storage API.
+Terminal221b is an Expo/React Native chat client and an installable, local-first coding CLI.
+The CLI sends selected workspace text to Anthropic and requires explicit approval before applying a proposed diff.
 
 [![CI](https://github.com/Bakery-street-project/Terminal221b/actions/workflows/ci.yml/badge.svg)](https://github.com/Bakery-street-project/Terminal221b/actions/workflows/ci.yml)
 
@@ -13,15 +13,23 @@ The repository currently implements a single-screen Claude chat prototype. It do
 
 ```mermaid
 flowchart TD
-    User --> App["Expo app"]
-    App --> Chat["ChatScreen"]
-    Chat --> Store["Zustand chat store"]
-    Store --> Sessions["AsyncStorage: sessions and non-secret settings"]
-    Store --> Key["SecureStore on iOS and Android"]
-    Chat --> Service["ClaudeService"]
+    subgraph Mobile["Existing mobile and web app"]
+      User --> App["Expo app"]
+      App --> Chat["ChatScreen"]
+      Chat --> Store["Zustand chat store"]
+      Store --> Sessions["AsyncStorage: sessions and non-secret settings"]
+      Store --> Key["SecureStore on iOS and Android"]
+      Chat --> Service["ClaudeService"]
+    end
+    subgraph Terminal["Terminal CLI"]
+      Developer --> CLI["terminal221b ask"]
+      CLI --> Context["Bounded workspace context"]
+      CLI --> Approval["Explicit diff review and approval"]
+      Approval --> GitApply["git apply (after approval)"]
+    end
     Service --> API["Anthropic Messages API"]
+    CLI --> API
     API --> Service
-    Service --> Chat
 ```
 
 `App.tsx` loads the persisted store. `ChatScreen` handles the chat UI and settings for a user-provided API key. `ClaudeService` sends the conversation to Anthropic and returns the first text block in the response. The native app keeps the API key in SecureStore; web builds keep it in memory only.
@@ -50,7 +58,7 @@ To start the web development server, run `npm run web`. To create the web export
 
 ### Environment
 
-The app does not load API keys from `.env` files. `.env.example` documents this intentionally: do not expose an Anthropic key through an `EXPO_PUBLIC_*` variable because client bundle values are public.
+The mobile app does not load API keys from `.env` files. The terminal CLI reads `ANTHROPIC_API_KEY` from the invoking process environment; never use `EXPO_PUBLIC_*` for secrets because client bundle values are public.
 
 ## Usage
 
@@ -66,11 +74,37 @@ ClaudeService result: A mocked reply
 
 The test validates request headers, model and token defaults, and error handling without making a network request.
 
+## Terminal CLI
+
+The separate `@terminal221b/cli` workspace builds the `terminal221b` command with Node.js 22 or later. It is currently an early CLI, not a full-screen terminal UI or autonomous agent.
+
+```sh
+npm ci
+npm run build:cli
+npm run cli -- ask --workspace . "Summarize the source layout"
+```
+
+The CLI reads a bounded set of text files (up to 80 files and 256 KB total), skips hidden files, symlinks, dependency/build folders, and common environment files, then sends that context and the prompt to Anthropic. Set `ANTHROPIC_API_KEY` in the shell before using it. Files leave the machine for the configured Anthropic endpoint; do not run it on a workspace you are not willing to share with that provider.
+
+To request a code change, add `--apply`. The CLI accepts only a unified diff, rejects workspace traversal, symlink paths, binary diffs, and secret-file destinations, validates the patch with `git apply --check`, shows the diff, and writes only if you type `APPLY`. It never executes model-generated shell commands.
+
+To install just the CLI into a temporary user prefix for a smoke test:
+
+```sh
+npm pack --workspace @terminal221b/cli --pack-destination /tmp
+npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1.0.tgz
+/tmp/terminal221b-prefix/bin/terminal221b --help
+```
+
+For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
+
+The CLI currently supports one Anthropic provider and one-shot prompts. It does not yet execute tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or integrate a full security analyzer.
+
 ## Status and limitations
 
 - Primary language: TypeScript. The app uses Expo SDK 54, React Native, Zustand, AsyncStorage, SecureStore, and the Anthropic Messages API.
 - Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, and direct text requests.
-- Not implemented: blockchain or Solana features, autonomous agents, TensorRT/local inference, a backend proxy, session-list/navigation UI, model selection, streaming, or attachment handling.
+- Not implemented: blockchain or Solana features, remote bounty testing, an autonomous tool loop, TensorRT/local inference, a backend proxy, session-list/navigation UI, mobile model selection, streaming, or attachment handling.
 - Chat history remains in AsyncStorage and is not encrypted. Native API keys are stored in OS secure storage. Web API keys are memory-only.
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
@@ -80,9 +114,9 @@ The test validates request headers, model and token defaults, and error handling
 ## Roadmap
 
 1. Add store tests for storage migration, key handling, and session lifecycle.
-2. Add session navigation and model selection.
-3. Add request cancellation and clearer network/offline states.
-4. Decide whether a backend proxy is needed before distributing builds beyond personal use.
+2. Add CLI session history and a terminal interface after the one-shot workflow is stable.
+3. Add local-only source/dependency security checks with explicit workspace scope and reviewable fixes.
+4. Add optional Solana/SVM tool discovery and safe local development profiles; never handle wallet secrets or broadcast transactions.
 5. Review and resolve dependency advisories without an untested Expo major upgrade.
 
 ## Support

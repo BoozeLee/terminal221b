@@ -3,5 +3,5 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["node_modules", "dist", ".expo", "coverage"]
+  "exclude": ["node_modules", "dist", ".expo", "coverage", "packages/cli"]
 }
