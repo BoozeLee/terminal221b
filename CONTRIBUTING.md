@@ -1,48 +1,14 @@
-# Contributing to Terminal221b
+# Contributing
 
-Thank you for your interest in contributing to Terminal221b!
+Use Node.js 22 and npm. Install the locked dependencies with `npm ci`, then run:
 
-## Getting Started
-
-1. Fork the repository
-2. Clone your fork locally: `git clone https://github.com/bakery-street-project/Terminal221b.git`
-3. Create a new branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Commit your changes: `git commit -m 'Add some feature'`
-6. Push to the branch: `git push origin feature/your-feature-name`
-7. Open a Pull Request
-
-## Development Setup
-
-```bash
-# Install dev dependencies
-npm install --save-dev
-
-# Format code
-npx prettier --write .
-
-# Run linter
+```sh
 npm run lint
+npm test
+npm run typecheck
+npm run build
 ```
 
-## Code Style
+Keep pull requests focused, add deterministic tests for changed logic, and document checks that require a device or API credential. Do not commit API keys or place them in `EXPO_PUBLIC_*` variables; client-exposed values are not secrets.
 
-This project follows standard TypeScript conventions.
-
-- **Style Guide**: https://standardjs.com
-- **Linting**: Run `npm run lint` before committing
-
-## Testing
-
-Run tests with: `npm test`
-
-## Pull Request Process
-
-1. Ensure your code passes all CI/CD checks
-2. Update documentation as needed
-3. Add tests for new features
-4. Keep PRs focused and concise
-
-## Questions?
-
-Feel free to open an issue for questions or discussion.
+The repository is proprietary. Do not redistribute or reuse it without permission under the terms in [LICENSE](LICENSE).
