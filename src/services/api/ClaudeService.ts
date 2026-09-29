@@ -91,7 +91,7 @@ export class ClaudeService {
         maxTokens: 10,
       });
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

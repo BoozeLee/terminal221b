@@ -2,6 +2,8 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { ChatSession, Message, AppConfig } from '../types';
 
 interface ChatStore {
@@ -9,6 +11,8 @@ interface ChatStore {
   currentSessionId: string | null;
   config: AppConfig;
   isLoading: boolean;
+  hasLoadedFromStorage: boolean;
+  storageError: string | null;
 
   // Actions
   createSession: (title?: string) => string;
@@ -16,7 +20,7 @@ interface ChatStore {
   selectSession: (sessionId: string) => void;
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
-  updateConfig: (config: Partial<AppConfig>) => void;
+  updateConfig: (config: Partial<AppConfig>) => Promise<void>;
   setLoading: (loading: boolean) => void;
   loadFromStorage: () => Promise<void>;
   saveToStorage: () => Promise<void>;
@@ -24,6 +28,13 @@ interface ChatStore {
 }
 
 const STORAGE_KEY = '@Terminal221B:store';
+const API_KEY_STORAGE_KEY = '@Terminal221B:apiKey';
+
+const persistInBackground = (get: () => ChatStore) => {
+  void get()
+    .saveToStorage()
+    .catch((error) => console.error('Failed to persist chat state:', error));
+};
 
 const defaultConfig: AppConfig = {
   apiKey: '',
@@ -38,6 +49,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   currentSessionId: null,
   config: defaultConfig,
   isLoading: false,
+  hasLoadedFromStorage: false,
+  storageError: null,
 
   createSession: (title?: string) => {
     const newSession: ChatSession = {
@@ -54,7 +67,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
 
     // Auto-save after creating session
-    get().saveToStorage();
+    persistInBackground(get);
 
     return newSession.id;
   },
@@ -73,7 +86,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       };
     });
 
-    get().saveToStorage();
+    persistInBackground(get);
   },
 
   selectSession: (sessionId: string) => {
@@ -102,7 +115,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return { sessions };
     });
 
-    get().saveToStorage();
+    persistInBackground(get);
   },
 
   updateSessionTitle: (sessionId: string, title: string) => {
@@ -114,15 +127,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ),
     }));
 
-    get().saveToStorage();
+    persistInBackground(get);
   },
 
-  updateConfig: (newConfig: Partial<AppConfig>) => {
+  updateConfig: async (newConfig: Partial<AppConfig>) => {
+    if (Platform.OS !== 'web' && newConfig.apiKey !== undefined) {
+      const apiKey = newConfig.apiKey.trim();
+      if (apiKey) {
+        await SecureStore.setItemAsync(API_KEY_STORAGE_KEY, apiKey);
+      } else {
+        await SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY);
+      }
+    }
+
     set((state) => ({
       config: { ...state.config, ...newConfig },
     }));
 
-    get().saveToStorage();
+    await get().saveToStorage();
+    set({ storageError: null });
   },
 
   setLoading: (loading: boolean) => {
@@ -132,33 +155,62 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   loadFromStorage: async () => {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
+      const parsed = stored ? JSON.parse(stored) : {};
+      const storedConfig = parsed.config || {};
+      const legacyApiKey =
+        typeof storedConfig.apiKey === 'string' ? storedConfig.apiKey : '';
+      let apiKey = '';
+      let canRewriteStorage = true;
+
+      if (Platform.OS !== 'web') {
+        try {
+          const secureApiKey = await SecureStore.getItemAsync(
+            API_KEY_STORAGE_KEY
+          );
+          apiKey = secureApiKey || legacyApiKey;
+          if (legacyApiKey && !secureApiKey) {
+            await SecureStore.setItemAsync(API_KEY_STORAGE_KEY, legacyApiKey);
+          }
+        } catch (error) {
+          console.error('Failed to load API key from secure storage:', error);
+          apiKey = legacyApiKey;
+          canRewriteStorage = false;
+        }
+      }
+
+      set({
+        sessions: parsed.sessions || [],
+        currentSessionId: parsed.currentSessionId || null,
+        config: { ...defaultConfig, ...storedConfig, apiKey },
+        storageError: null,
+      });
+      if (canRewriteStorage) {
+        await get().saveToStorage();
+      } else {
         set({
-          sessions: parsed.sessions || [],
-          currentSessionId: parsed.currentSessionId || null,
-          config: { ...defaultConfig, ...parsed.config },
+          storageError:
+            'Could not access secure storage. Any saved API key could not be verified or migrated; existing storage was left unchanged. Retry in Settings after secure storage is available.',
         });
       }
     } catch (error) {
       console.error('Failed to load from storage:', error);
+      set({ storageError: 'Unable to load or migrate saved chat data.' });
+    } finally {
+      set({ hasLoadedFromStorage: true });
     }
   },
 
   saveToStorage: async () => {
-    try {
-      const { sessions, currentSessionId, config } = get();
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          sessions,
-          currentSessionId,
-          config,
-        })
-      );
-    } catch (error) {
-      console.error('Failed to save to storage:', error);
-    }
+    const { sessions, currentSessionId, config } = get();
+    const { apiKey: _apiKey, ...persistedConfig } = config;
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        sessions,
+        currentSessionId,
+        config: persistedConfig,
+      })
+    );
   },
 
   clearAllData: () => {
@@ -166,8 +218,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       sessions: [],
       currentSessionId: null,
       config: defaultConfig,
+      storageError: null,
     });
 
-    AsyncStorage.removeItem(STORAGE_KEY);
+    AsyncStorage.removeItem(STORAGE_KEY).catch((error) => {
+      console.error('Failed to clear stored chat data:', error);
+    });
+    if (Platform.OS !== 'web') {
+      SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY).catch((error) => {
+        console.error('Failed to clear the stored API key:', error);
+      });
+    }
   },
 }));

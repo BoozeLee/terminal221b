@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
+  Modal,
 } from 'react-native';
 import { useChatStore } from '../../store/chatStore';
 import { ClaudeService } from '../../services/api/ClaudeService';
@@ -19,6 +20,8 @@ import { Message } from '../../types';
 
 export const ChatScreen: React.FC = () => {
   const [inputText, setInputText] = useState('');
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const {
@@ -26,19 +29,33 @@ export const ChatScreen: React.FC = () => {
     currentSessionId,
     config,
     isLoading,
+    hasLoadedFromStorage,
+    storageError,
     addMessage,
     createSession,
     setLoading,
+    updateConfig,
   } = useChatStore();
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
 
   useEffect(() => {
-    // Create initial session if none exists
-    if (sessions.length === 0) {
+    if (hasLoadedFromStorage && sessions.length === 0) {
       createSession('New Chat');
     }
-  }, []);
+  }, [createSession, hasLoadedFromStorage, sessions.length]);
+
+  useEffect(() => {
+    if (settingsVisible) {
+      setApiKeyDraft(config.apiKey);
+    }
+  }, [config.apiKey, settingsVisible]);
+
+  useEffect(() => {
+    if (storageError) {
+      Alert.alert('Storage warning', storageError);
+    }
+  }, [storageError]);
 
   useEffect(() => {
     // Scroll to bottom when new messages arrive
@@ -50,7 +67,7 @@ export const ChatScreen: React.FC = () => {
   }, [currentSession?.messages.length]);
 
   const handleSend = async () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim() || isLoading || !hasLoadedFromStorage) return;
 
     if (!config.apiKey) {
       Alert.alert(
@@ -60,11 +77,7 @@ export const ChatScreen: React.FC = () => {
       return;
     }
 
-    if (!currentSessionId) {
-      const newSessionId = createSession();
-      // Wait a bit for state to update
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    const sessionId = currentSessionId || createSession('New Chat');
 
     const userMessage = inputText.trim();
     setInputText('');
@@ -73,17 +86,19 @@ export const ChatScreen: React.FC = () => {
     addMessage({
       role: 'user',
       content: userMessage,
-      sessionId: currentSessionId!,
+      sessionId,
     });
 
     setLoading(true);
 
     try {
       // Get conversation history
-      const conversationMessages = currentSession?.messages.map((msg) => ({
+      const previousMessages =
+        sessions.find((session) => session.id === sessionId)?.messages || [];
+      const conversationMessages = previousMessages.map((msg) => ({
         role: msg.role,
         content: msg.content,
-      })) || [];
+      }));
 
       // Add current user message
       conversationMessages.push({
@@ -105,7 +120,7 @@ export const ChatScreen: React.FC = () => {
       addMessage({
         role: 'assistant',
         content: response,
-        sessionId: currentSessionId!,
+        sessionId,
       });
     } catch (error) {
       Alert.alert(
@@ -114,6 +129,18 @@ export const ChatScreen: React.FC = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      await updateConfig({ apiKey: apiKeyDraft.trim() });
+      setSettingsVisible(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to save settings',
+        error instanceof Error ? error.message : 'Failed to save the API key'
+      );
     }
   };
 
@@ -142,13 +169,67 @@ export const ChatScreen: React.FC = () => {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          {currentSession?.title || 'Terminal 221B'}
-        </Text>
-        <Text style={styles.headerSubtitle}>
-          {config.model.replace('claude-', '')}
-        </Text>
+        <View>
+          <Text style={styles.headerTitle}>
+            {currentSession?.title || 'Terminal 221B'}
+          </Text>
+          <Text style={styles.headerSubtitle}>
+            {config.model.replace('claude-', '')}
+          </Text>
+        </View>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => setSettingsVisible(true)}
+          style={styles.settingsButton}
+        >
+          <Text style={styles.settingsButtonText}>Settings</Text>
+        </TouchableOpacity>
       </View>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setSettingsVisible(false)}
+        transparent
+        visible={settingsVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.settingsPanel}>
+            <Text style={styles.settingsTitle}>Settings</Text>
+            <Text style={styles.settingsLabel}>Anthropic API key</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={setApiKeyDraft}
+              placeholder="Enter your API key"
+              placeholderTextColor="#6B7280"
+              secureTextEntry
+              style={styles.settingsInput}
+              value={apiKeyDraft}
+            />
+            <Text style={styles.settingsNote}>
+              {Platform.OS === 'web'
+                ? 'Web builds keep the key in memory only. Do not use a live key in a web build.'
+                : 'On this device, the key is stored using the operating system secure-storage API.'}
+            </Text>
+            <View style={styles.settingsActions}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={() => setSettingsVisible(false)}
+                style={styles.cancelButton}
+              >
+                <Text style={styles.settingsButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={saveSettings}
+                style={styles.saveButton}
+              >
+                <Text style={styles.settingsButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Messages List */}
       <FlatList
@@ -189,13 +270,13 @@ export const ChatScreen: React.FC = () => {
           onChangeText={setInputText}
           multiline
           maxLength={10000}
-          editable={!isLoading}
+          editable={!isLoading && hasLoadedFromStorage}
           onSubmitEditing={handleSend}
         />
         <TouchableOpacity
           style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
           onPress={handleSend}
-          disabled={!inputText.trim() || isLoading}
+          disabled={!inputText.trim() || isLoading || !hasLoadedFromStorage}
         >
           <Text style={styles.sendButtonText}>Send</Text>
         </TouchableOpacity>
@@ -210,6 +291,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F1419',
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#1F2937',
@@ -224,6 +308,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     marginTop: 2,
+  },
+  settingsButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: '#1F2937',
+  },
+  settingsButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  settingsPanel: {
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: '#111827',
+  },
+  settingsTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  settingsLabel: {
+    color: '#E5E7EB',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  settingsInput: {
+    backgroundColor: '#1F2937',
+    borderRadius: 10,
+    color: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  settingsNote: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+  },
+  settingsActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+  },
+  cancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginRight: 8,
+  },
+  saveButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
   },
   messagesList: {
     padding: 16,

@@ -10,9 +10,8 @@ export default function App() {
   const { loadFromStorage } = useChatStore();
 
   useEffect(() => {
-    // Load persisted data on app start
-    loadFromStorage();
-  }, []);
+    void loadFromStorage();
+  }, [loadFromStorage]);
 
   return (
     <SafeAreaProvider>

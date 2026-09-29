@@ -6,14 +6,15 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint App.tsx index.ts src",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "expo export --platform web"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-navigation/native": "^7.1.28",
-    "@react-navigation/stack": "^7.7.1",
-    "axios": "^1.13.4",
     "expo": "~54.0.33",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",
@@ -27,7 +28,11 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
+    "eslint": "^10.11.0",
+    "typescript": "~5.9.2",
+    "vitest": "^5.0.2"
   },
   "private": true
 }
