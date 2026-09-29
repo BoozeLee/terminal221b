@@ -5,5 +5,3 @@ This is a client-side mobile app that sends a user-provided Anthropic API key di
 To report a vulnerability, use GitHub private vulnerability reporting or a security advisory for this repository if enabled. Otherwise, contact the repository owner privately through GitHub. Do not post sensitive details in a public issue.
 
 Dependency scans currently report advisories in the Expo toolchain; see the hiring-readiness pull request for the scan results and unresolved upgrade constraints.
-
-A Gitleaks scan flagged a GitHub fine-grained-token-shaped value in an IDE state file in repository history. That file is absent from the current tree, but validity, revocation, and history cleanup are unverified. Treat the value as exposed and revoke it if it is still active.
