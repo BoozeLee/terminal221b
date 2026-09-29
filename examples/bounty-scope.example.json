@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "program": "Example local fixture only",
+  "policyUrl": "https://example.test/security",
+  "inScope": ["https://staging.example.test/api"],
+  "outOfScope": ["https://staging.example.test/api/admin"]
+}

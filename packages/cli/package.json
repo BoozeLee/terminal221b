@@ -9,7 +9,8 @@
     "terminal221b": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "resources"
   ],
   "engines": {
     "node": ">=22"

@@ -26,6 +26,9 @@ flowchart TD
       CLI --> Context["Bounded workspace context"]
       CLI --> Approval["Explicit diff review and approval"]
       Approval --> GitApply["git apply (after approval)"]
+      CLI --> LocalScan["Local-only security triage"]
+      CLI --> Scope["Bounty scope manifest validation"]
+      CLI --> Tools["Installed tool discovery"]
     end
     Service --> API["Anthropic Messages API"]
     CLI --> API
@@ -88,6 +91,22 @@ The CLI reads a bounded set of text files (up to 80 files and 256 KB total), ski
 
 To request a code change, add `--apply`. The CLI accepts only a unified diff, rejects workspace traversal, symlink paths, binary diffs, and secret-file destinations, validates the patch with `git apply --check`, shows the diff, and writes only if you type `APPLY`. It never executes model-generated shell commands.
 
+### Local security triage and toolchains
+
+```sh
+terminal221b security scan --workspace .
+terminal221b tools
+terminal221b scope validate examples/bounty-scope.example.json
+```
+
+`security scan` is a local heuristic pass for a small set of exposed-credential patterns and selected source-code review indicators. It hides candidate values, skips symlinks and common private/generated directories, and reports when scan limits are reached. It is not a complete vulnerability scanner and a match is not proof of exploitability. `tools` only checks whether supported tools are on `PATH`; it neither executes nor installs them. The current crypto/Solana catalog covers Solana CLI, Anchor/AVM, Foundry, and solc; security-tool discovery includes Gitleaks, Semgrep, Trivy, Bandit, Slither, and cargo-audit.
+
+The scope manifest is data for local review only. Wildcards and non-HTTPS targets are rejected; out-of-scope paths override an in-scope path prefix. Terminal221b currently has no remote target-testing feature. Do not test any program asset without checking its current rules and obtaining authorization.
+
+Built-in scans use deterministic local heuristic patterns. Gitleaks and Bandit run only if explicitly selected with `--with-gitleaks` or `--with-bandit`; Gitleaks scans the selected workspace, while Bandit receives the Python source files found by Terminal221b. Both are local-only, capture structured output, discard secret values returned by scanners, and print only the finding path/rule/line. Other discovered analyzers are not invoked automatically.
+
+For Omarchy/Arch Linux, `terminal221b setup omarchy --dry-run` prints a package plan. It queries enabled official pacman package metadata but never installs packages, elevates privileges, builds AUR packages, or runs upstream installers. AUR candidates require manual `PKGBUILD` and source review. Official references list Gitleaks and Trivy in the enabled repositories; Solana CLI and Foundry are AUR/manual candidates, and Anchor/AVM follows upstream installation instructions. This project does not install these host tools automatically.
+
 To install just the CLI into a temporary user prefix for a smoke test:
 
 ```sh
@@ -98,7 +117,7 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 
 For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
 
-The CLI currently supports one Anthropic provider and one-shot prompts. It does not yet execute tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or integrate a full security analyzer.
+The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers.
 
 ## Status and limitations
 
@@ -115,8 +134,8 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 
 1. Add store tests for storage migration, key handling, and session lifecycle.
 2. Add CLI session history and a terminal interface after the one-shot workflow is stable.
-3. Add local-only source/dependency security checks with explicit workspace scope and reviewable fixes.
-4. Add optional Solana/SVM tool discovery and safe local development profiles; never handle wallet secrets or broadcast transactions.
+3. Expand local security analysis beyond the current heuristic checks and opt-in Gitleaks/Bandit support.
+4. Define and test local Solana/SVM development profiles; tool discovery alone does not configure or run these tools.
 5. Review and resolve dependency advisories without an untested Expo major upgrade.
 
 ## Support

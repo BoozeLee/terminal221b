@@ -1,4 +1,5 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -106,5 +107,31 @@ describe('patch approval and workspace boundaries', () => {
 
     expect(paths).toEqual(['src/file.ts']);
     expect(runGitApply.mock.calls.map((call) => call[2])).toEqual([true, false]);
+  });
+
+  it('applies a valid patch to the selected git workspace after approval', async () => {
+    const root = await makeDirectory();
+    await mkdir(join(root, 'src'));
+    await writeFile(join(root, 'src', 'file.ts'), 'old\n');
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['add', 'src/file.ts'], { cwd: root });
+    const patch = [
+      'diff --git a/src/file.ts b/src/file.ts',
+      '--- a/src/file.ts',
+      '+++ b/src/file.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+
+    const changed = await applyApprovedPatch(
+      root,
+      patch,
+      async () => true
+    );
+
+    expect(changed).toEqual(['src/file.ts']);
+    await expect(readFile(join(root, 'src', 'file.ts'), 'utf8')).resolves.toBe('new\n');
   });
 });

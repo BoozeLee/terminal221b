@@ -9,6 +9,7 @@
     "web": "expo start --web",
     "cli": "npm run start --workspace @terminal221b/cli --",
     "build:cli": "npm run build --workspace @terminal221b/cli",
+    "lint:shell": "shellcheck packages/cli/resources/*.sh",
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",

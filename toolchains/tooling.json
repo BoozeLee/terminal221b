@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "profiles": {
+    "security": {
+      "description": "Local repository review and source analysis.",
+      "tools": [
+        {
+          "name": "gitleaks",
+          "binary": "gitleaks",
+          "source": "Arch extra repository or upstream releases",
+          "officialArchPackage": "gitleaks",
+          "documentation": "https://github.com/gitleaks/gitleaks"
+        },
+        {
+          "name": "trivy",
+          "binary": "trivy",
+          "source": "Arch extra repository or upstream releases",
+          "officialArchPackage": "trivy",
+          "documentation": "https://trivy.dev/latest/docs/"
+        },
+        {
+          "name": "bandit",
+          "binary": "bandit",
+          "source": "Python isolated environment (pipx recommended)",
+          "documentation": "https://bandit.readthedocs.io/"
+        },
+        {
+          "name": "semgrep",
+          "binary": "semgrep",
+          "source": "Upstream-supported installer",
+          "documentation": "https://semgrep.dev/docs/"
+        },
+        {
+          "name": "slither",
+          "binary": "slither",
+          "source": "Python isolated environment (pipx recommended)",
+          "documentation": "https://github.com/crytic/slither"
+        },
+        {
+          "name": "cargo-audit",
+          "binary": "cargo-audit",
+          "source": "Cargo install",
+          "documentation": "https://github.com/rustsec/rustsec/tree/main/cargo-audit"
+        }
+      ]
+    },
+    "solana": {
+      "description": "Local Solana/SVM development. Use local validator or explicitly selected devnet; no wallet signing in Terminal221b.",
+      "tools": [
+        {
+          "name": "solana",
+          "binary": "solana",
+          "source": "Official Anza installer or AUR package reviewed by the user",
+          "aurPackage": "solana-cli",
+          "documentation": "https://solana.com/docs/intro/installation"
+        },
+        {
+          "name": "anchor",
+          "binary": "anchor",
+          "source": "Anchor Version Manager (AVM), upstream instructions",
+          "documentation": "https://www.anchor-lang.com/docs/installation"
+        },
+        {
+          "name": "avm",
+          "binary": "avm",
+          "source": "Anchor Version Manager",
+          "documentation": "https://www.anchor-lang.com/docs/installation"
+        }
+      ]
+    },
+    "evm": {
+      "description": "Local EVM contract build, test, and static analysis.",
+      "tools": [
+        {
+          "name": "forge",
+          "binary": "forge",
+          "source": "Foundry upstream installer or AUR package reviewed by the user",
+          "aurPackage": "foundry-bin",
+          "documentation": "https://book.getfoundry.sh/getting-started/installation"
+        },
+        {
+          "name": "cast",
+          "binary": "cast",
+          "source": "Bundled with Foundry",
+          "documentation": "https://book.getfoundry.sh/cast/"
+        },
+        {
+          "name": "solc",
+          "binary": "solc",
+          "source": "Solidity upstream or user-reviewed package",
+          "documentation": "https://docs.soliditylang.org/en/latest/installing-solidity.html"
+        }
+      ]
+    }
+  }
+}
