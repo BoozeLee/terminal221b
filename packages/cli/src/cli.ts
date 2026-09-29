@@ -10,6 +10,7 @@ import { scanLocalWorkspace } from './security.js';
 import { loadBountyScope } from './scope.js';
 import { discoverTools } from './tools.js';
 import { collectWorkspaceContext } from './workspace.js';
+import { buildCryptoPrompt } from './prompt.js';
 
 const defaultModel = 'claude-sonnet-4-5-20250929';
 
@@ -18,7 +19,9 @@ function printHelp(): void {
 
 Usage:
   terminal221b ask [--workspace PATH] [--apply] PROMPT
+  terminal221b crypto ask [--workspace PATH] [--apply] PROMPT
   terminal221b security scan [--workspace PATH] [--with-gitleaks] [--with-bandit]
+    [--with-semgrep] [--with-trivy] [--with-slither] [--with-cargo-audit]
   terminal221b scope validate PATH
   terminal221b tools
   terminal221b setup omarchy --dry-run
@@ -29,8 +32,11 @@ Options:
   --help             Show this help
 
 The CLI reads local text files and sends them with your prompt to Anthropic.
+The crypto mode focuses on software, protocol, NFT, and market-design discussion.
 It never runs model-generated shell commands. Applying a patch requires typing APPLY.
 Security scans inspect local files only; optional scanners run only when explicitly selected.
+Semgrep uses bundled local rules; Trivy and cargo-audit do not fetch databases during a scan.
+Slither checks discovered Solidity files only and does not run a project build.
 Scope validation never sends target requests.
 Omarchy setup prints a package plan only and never installs software.
 `);
@@ -114,6 +120,10 @@ async function runSecurityScan(args: string[]): Promise<void> {
   const selected = {
     gitleaks: args.includes('--with-gitleaks'),
     bandit: args.includes('--with-bandit'),
+    semgrep: args.includes('--with-semgrep'),
+    trivy: args.includes('--with-trivy'),
+    slither: args.includes('--with-slither'),
+    cargoAudit: args.includes('--with-cargo-audit'),
   };
   const result = await scanLocalWorkspace(workspace);
   const tools = await discoverTools();
@@ -125,7 +135,14 @@ async function runSecurityScan(args: string[]): Promise<void> {
   );
   console.log('Local analyzers and heuristic triage only. No network targets are contacted.');
   console.log(
-    `Selected analyzers: ${[selected.gitleaks && 'Gitleaks', selected.bandit && 'Bandit'].filter(Boolean).join(', ') || 'built-in heuristics only'}`
+    `Selected analyzers: ${[
+      selected.gitleaks && 'Gitleaks',
+      selected.bandit && 'Bandit',
+      selected.semgrep && 'Semgrep',
+      selected.trivy && 'Trivy',
+      selected.slither && 'Slither',
+      selected.cargoAudit && 'cargo-audit',
+    ].filter(Boolean).join(', ') || 'built-in heuristics only'}`
   );
   for (const finding of result.findings) {
     console.log(
@@ -196,9 +213,13 @@ async function main(): Promise<void> {
     }
     return printOmarchyPlan(args.slice(1));
   }
-  if (command !== 'ask') throw new Error(`Unknown command: ${command}`);
+  const cryptoMode = command === 'crypto';
+  if (command !== 'ask' && !cryptoMode) throw new Error(`Unknown command: ${command}`);
+  if (cryptoMode && args[0] !== 'ask') {
+    throw new Error('Usage: terminal221b crypto ask [--workspace PATH] [--apply] PROMPT');
+  }
 
-  const options = parseArgs(args);
+  const options = parseArgs(cryptoMode ? args.slice(1) : args);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('Set ANTHROPIC_API_KEY in your shell before using ask');
 
@@ -210,9 +231,10 @@ async function main(): Promise<void> {
     `Workspace: ${context.root} (${context.files.length} files, ${context.totalBytes} bytes)`
   );
 
+  const prompt = cryptoMode ? buildCryptoPrompt(options.prompt) : options.prompt;
   const instruction = options.apply
-    ? `${options.prompt}\nReturn only a unified git diff. Do not include explanations or commands.`
-    : options.prompt;
+    ? `${prompt}\nReturn only a unified git diff. Do not include explanations or commands.`
+    : prompt;
   const answer = await askAnthropic({
     apiKey,
     model: process.env.TERMINAL221B_MODEL ?? defaultModel,

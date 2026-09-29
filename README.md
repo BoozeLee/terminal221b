@@ -91,6 +91,14 @@ The CLI reads a bounded set of text files (up to 80 files and 256 KB total), ski
 
 To request a code change, add `--apply`. The CLI accepts only a unified diff, rejects workspace traversal, symlink paths, binary diffs, and secret-file destinations, validates the patch with `git apply --check`, shows the diff, and writes only if you type `APPLY`. It never executes model-generated shell commands.
 
+For crypto-focused text chat about project architecture, protocol/NFT ideas, or market mechanics:
+
+```sh
+terminal221b crypto ask --workspace ./my-project "Review this Solana program's account model"
+```
+
+This mode sends the selected local text context to Anthropic like `ask`; it is not a live market-data feed or autonomous agent. It does not provide personalized investment recommendations, place trades, sign transactions, manage wallet keys, or contact bounty targets.
+
 ### Local security triage and toolchains
 
 ```sh
@@ -99,13 +107,21 @@ terminal221b tools
 terminal221b scope validate examples/bounty-scope.example.json
 ```
 
-`security scan` is a local heuristic pass for a small set of exposed-credential patterns and selected source-code review indicators. It hides candidate values, skips symlinks and common private/generated directories, and reports when scan limits are reached. It is not a complete vulnerability scanner and a match is not proof of exploitability. `tools` only checks whether supported tools are on `PATH`; it neither executes nor installs them. The current crypto/Solana catalog covers Solana CLI, Anchor/AVM, Foundry, and solc; security-tool discovery includes Gitleaks, Semgrep, Trivy, Bandit, Slither, and cargo-audit.
+`security scan` runs built-in heuristics and only runs optional analyzers explicitly selected by flags:
+
+```sh
+terminal221b security scan --workspace . \
+  --with-gitleaks --with-bandit --with-semgrep --with-trivy \
+  --with-slither --with-cargo-audit
+```
+
+Gitleaks and Bandit scan local files; Semgrep uses bundled local rules with metrics disabled; Trivy runs offline and skips database updates; Slither examines discovered Solidity files without invoking a project build; cargo-audit uses the cached advisory database with fetching disabled. Findings are reduced to path, line, rule, and severity; scanner source excerpts and secret values are not printed. Trivy requires a previously cached vulnerability database for dependency findings, and cargo-audit requires a cached advisory database. Update those databases separately when network access is permitted. These tools are not a complete security review and findings are not proof of exploitability. `tools` only checks whether supported tools are on `PATH`; it neither executes nor installs them.
 
 The scope manifest is data for local review only. Wildcards and non-HTTPS targets are rejected; out-of-scope paths override an in-scope path prefix. Terminal221b currently has no remote target-testing feature. Do not test any program asset without checking its current rules and obtaining authorization.
 
 Built-in scans use deterministic local heuristic patterns. Gitleaks and Bandit run only if explicitly selected with `--with-gitleaks` or `--with-bandit`; Gitleaks scans the selected workspace, while Bandit receives the Python source files found by Terminal221b. Both are local-only, capture structured output, discard secret values returned by scanners, and print only the finding path/rule/line. Other discovered analyzers are not invoked automatically.
 
-For Omarchy/Arch Linux, `terminal221b setup omarchy --dry-run` prints a package plan. It queries enabled official pacman package metadata but never installs packages, elevates privileges, builds AUR packages, or runs upstream installers. AUR candidates require manual `PKGBUILD` and source review. Official references list Gitleaks and Trivy in the enabled repositories; Solana CLI and Foundry are AUR/manual candidates, and Anchor/AVM follows upstream installation instructions. This project does not install these host tools automatically.
+For Omarchy/Arch Linux, `terminal221b setup omarchy --dry-run` prints a package plan. It queries enabled official pacman package metadata but never installs packages, elevates privileges, builds AUR packages, or runs upstream installers. AUR candidates require manual `PKGBUILD` and source review. Gitleaks, Trivy, and cargo-audit are available from official Arch repositories. Foundry's upstream installer verifies release binary hashes; Slither and Semgrep can be isolated with pipx. Solana CLI and Anchor/AVM follow their upstream installation instructions. This project does not install host tools automatically.
 
 To install just the CLI into a temporary user prefix for a smoke test:
 
@@ -117,7 +133,7 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 
 For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
 
-The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers.
+The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute model-directed tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers. Crypto ideas and project analysis can be discussed with the existing chat prompt, but the CLI does not trade NFTs/tokens, manage wallets, or submit bounty reports.
 
 ## Status and limitations
 

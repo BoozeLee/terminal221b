@@ -1,0 +1,13 @@
+rules:
+  - id: terminal221b.python.shell-true
+    languages:
+      - python
+    message: Review shell=True when arguments can contain untrusted input.
+    severity: WARNING
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: terminal221b.solidity.tx-origin
+    languages:
+      - solidity
+    message: Review use of tx.origin in authorization decisions.
+    severity: WARNING
+    pattern: tx.origin

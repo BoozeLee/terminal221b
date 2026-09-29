@@ -27,19 +27,20 @@
         {
           "name": "semgrep",
           "binary": "semgrep",
-          "source": "Upstream-supported installer",
+          "source": "pipx isolated install from the official Python package",
           "documentation": "https://semgrep.dev/docs/"
         },
         {
           "name": "slither",
           "binary": "slither",
-          "source": "Python isolated environment (pipx recommended)",
+          "source": "pipx isolated install from the official Python package",
           "documentation": "https://github.com/crytic/slither"
         },
         {
           "name": "cargo-audit",
           "binary": "cargo-audit",
-          "source": "Cargo install",
+          "source": "Arch extra repository or cargo install",
+          "officialArchPackage": "cargo-audit",
           "documentation": "https://github.com/rustsec/rustsec/tree/main/cargo-audit"
         }
       ]
@@ -74,8 +75,7 @@
         {
           "name": "forge",
           "binary": "forge",
-          "source": "Foundry upstream installer or AUR package reviewed by the user",
-          "aurPackage": "foundry-bin",
+          "source": "Foundry upstream installer with release hash verification",
           "documentation": "https://book.getfoundry.sh/getting-started/installation"
         },
         {
