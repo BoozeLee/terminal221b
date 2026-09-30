@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    io::{self, stdout},
+    io::stdout,
     path::{Component, Path, PathBuf},
     process::Command,
     sync::mpsc::{self, Receiver, Sender},
@@ -24,34 +24,14 @@ use ratatui::{
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
+mod prompt;
 mod session;
+mod workspace;
 
-const MAX_FILES: usize = 80;
-const MAX_FILE_BYTES: u64 = 32_000;
-const MAX_TOTAL_BYTES: usize = 256_000;
+use prompt::PromptBuffer;
+use workspace::{collect_context, collect_context_files, format_context_preflight};
+
 const MODEL: &str = "claude-sonnet-4-5-20250929";
-const CONTEXT_EXTENSIONS: &[&str] = &[
-    "c", "cc", "cpp", "cs", "go", "h", "hpp", "java", "js", "jsx", "md", "mjs", "mts", "php", "py",
-    "rb", "rs", "scss", "sh", "sol", "sql", "toml", "ts", "tsx", "vue", "vy", "yaml", "yml",
-];
-const IGNORED_DIRS: &[&str] = &[
-    ".aws",
-    ".cache",
-    ".expo",
-    ".git",
-    ".gnupg",
-    ".local",
-    ".next",
-    ".ssh",
-    ".venv",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "target",
-    "vendor",
-    "venv",
-];
 
 #[derive(Clone)]
 struct Message {
@@ -73,121 +53,6 @@ struct App {
     should_quit: bool,
 }
 
-#[derive(Default, Debug, PartialEq, Eq)]
-struct PromptBuffer {
-    text: String,
-    cursor: usize,
-    preferred_column: Option<usize>,
-}
-
-impl PromptBuffer {
-    fn as_str(&self) -> &str {
-        &self.text
-    }
-
-    fn clear(&mut self) {
-        self.text.clear();
-        self.cursor = 0;
-        self.preferred_column = None;
-    }
-
-    fn insert(&mut self, character: char) {
-        self.text.insert(self.cursor, character);
-        self.cursor += character.len_utf8();
-        self.preferred_column = None;
-    }
-
-    fn backspace(&mut self) {
-        if let Some((start, _)) = self.text[..self.cursor].char_indices().next_back() {
-            self.text.drain(start..self.cursor);
-            self.cursor = start;
-        }
-        self.preferred_column = None;
-    }
-
-    fn delete(&mut self) {
-        if let Some(character) = self.text[self.cursor..].chars().next() {
-            let end = self.cursor + character.len_utf8();
-            self.text.drain(self.cursor..end);
-        }
-        self.preferred_column = None;
-    }
-
-    fn move_left(&mut self) {
-        if let Some((start, _)) = self.text[..self.cursor].char_indices().next_back() {
-            self.cursor = start;
-        }
-        self.preferred_column = None;
-    }
-
-    fn move_right(&mut self) {
-        if let Some(character) = self.text[self.cursor..].chars().next() {
-            self.cursor += character.len_utf8();
-        }
-        self.preferred_column = None;
-    }
-
-    fn move_home(&mut self) {
-        self.cursor = self.text[..self.cursor]
-            .rfind('\n')
-            .map_or(0, |newline| newline + 1);
-        self.preferred_column = None;
-    }
-
-    fn move_end(&mut self) {
-        self.cursor = self.text[self.cursor..]
-            .find('\n')
-            .map_or(self.text.len(), |newline| self.cursor + newline);
-        self.preferred_column = None;
-    }
-
-    fn move_vertical(&mut self, down: bool) {
-        let line_start = self.text[..self.cursor]
-            .rfind('\n')
-            .map_or(0, |newline| newline + 1);
-        let line_end = self.text[self.cursor..]
-            .find('\n')
-            .map_or(self.text.len(), |newline| self.cursor + newline);
-        let column = *self
-            .preferred_column
-            .get_or_insert_with(|| self.text[line_start..self.cursor].chars().count());
-        let target_start = if down {
-            if line_end == self.text.len() {
-                return;
-            }
-            line_end + 1
-        } else {
-            if line_start == 0 {
-                return;
-            }
-            self.text[..line_start - 1]
-                .rfind('\n')
-                .map_or(0, |newline| newline + 1)
-        };
-        let target_end = self.text[target_start..]
-            .find('\n')
-            .map_or(self.text.len(), |newline| target_start + newline);
-        let target_column = self.text[target_start..target_end]
-            .char_indices()
-            .nth(column)
-            .map_or(target_end, |(offset, _)| target_start + offset);
-        self.cursor = target_column;
-    }
-
-    fn cursor_line(&self) -> usize {
-        self.text[..self.cursor].matches('\n').count()
-    }
-
-    fn cursor_column(&self) -> usize {
-        self.text[..self.cursor]
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count()
-    }
-}
-
 fn page_scroll(current: Option<u16>, page_size: u16, max_scroll: u16, older: bool) -> Option<u16> {
     let current = current.unwrap_or_default().min(max_scroll);
     let next = if older {
@@ -200,7 +65,12 @@ fn page_scroll(current: Option<u16>, page_size: u16, max_scroll: u16, older: boo
 
 struct WorkerResult {
     answer: Result<String, String>,
-    patch_mode: bool,
+    task: WorkerTask,
+}
+
+enum WorkerTask {
+    Chat { patch_mode: bool },
+    ContextPreview,
 }
 
 #[derive(Serialize)]
@@ -233,73 +103,6 @@ struct ContentBlock {
 #[derive(Deserialize)]
 struct ApiError {
     message: Option<String>,
-}
-
-fn collect_context(root: &Path) -> io::Result<String> {
-    let mut files = Vec::new();
-    let mut total = 0usize;
-    collect_files(root, root, &mut files, &mut total)?;
-    let mut context = String::new();
-    for (path, content) in files {
-        context.push_str(&format!("--- {} ---\n{}\n\n", path.display(), content));
-    }
-    Ok(context)
-}
-
-fn collect_files(
-    root: &Path,
-    dir: &Path,
-    files: &mut Vec<(PathBuf, String)>,
-    total: &mut usize,
-) -> io::Result<()> {
-    if files.len() >= MAX_FILES || *total >= MAX_TOTAL_BYTES {
-        return Ok(());
-    }
-    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        if files.len() >= MAX_FILES || *total >= MAX_TOTAL_BYTES {
-            break;
-        }
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || name == "package-lock.json" || name == "pnpm-lock.yaml" {
-            continue;
-        }
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() {
-            continue;
-        }
-        if metadata.is_dir() {
-            if !IGNORED_DIRS.contains(&name.as_ref()) {
-                collect_files(root, &path, files, total)?;
-            }
-            continue;
-        }
-        if !metadata.is_file()
-            || metadata.len() > MAX_FILE_BYTES
-            || !path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| {
-                    CONTEXT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
-                })
-        {
-            continue;
-        }
-        let content = fs::read(&path)?;
-        if content.contains(&0) || total.saturating_add(content.len()) > MAX_TOTAL_BYTES {
-            continue;
-        }
-        let Ok(content) = String::from_utf8(content) else {
-            continue;
-        };
-        let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-        *total += content.len();
-        files.push((relative, content));
-    }
-    Ok(())
 }
 
 fn crypto_system() -> &'static str {
@@ -543,8 +346,13 @@ impl App {
         if prompt == "/help" {
             self.messages.push(Message {
                 role: "system",
-                text: "/help  show commands\n/crypto  toggle crypto-focused assistant context\n/tools  list local analyzers and chain tools\n/scan  run local heuristic scan\n/apply <request>  request a patch; inspect it and press y to apply or n to reject\n/save <name>  save user/assistant turns locally\n/sessions  list saved transcripts\n/load <name>  replace the current conversation with a saved transcript\n/clear  clear conversation\n/quit  exit".into(),
+                text: "/help  show commands\n/context  preview selected workspace paths and byte sizes locally\n/crypto  toggle crypto-focused assistant context\n/tools  list local analyzers and chain tools\n/scan  run local heuristic scan\n/apply <request>  request a patch; inspect it and press y to apply or n to reject\n/save <name>  save user/assistant turns locally\n/sessions  list saved transcripts\n/load <name>  replace the current conversation with a saved transcript\n/clear  clear conversation\n/quit  exit".into(),
             });
+            return;
+        }
+        if prompt == "/context" {
+            self.preview_context();
+            self.scroll = None;
             return;
         }
         if let Some(name) = prompt.strip_prefix("/save ") {
@@ -633,7 +441,23 @@ impl App {
                 });
             let _ = tx.send(WorkerResult {
                 answer: result,
-                patch_mode,
+                task: WorkerTask::Chat { patch_mode },
+            });
+        });
+    }
+
+    fn preview_context(&mut self) {
+        self.pending = true;
+        self.status = "Inspecting workspace context locally".into();
+        let root = self.root.clone();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = collect_context_files(&root)
+                .map(|files| format_context_preflight(&files))
+                .map_err(|error| format!("Could not inspect workspace context: {error}"));
+            let _ = tx.send(WorkerResult {
+                answer: result,
+                task: WorkerTask::ContextPreview,
             });
         });
     }
@@ -730,8 +554,30 @@ impl App {
         if let Ok(result) = self.rx.try_recv() {
             self.pending = false;
             self.scroll = None;
+            let patch_mode = match result.task {
+                WorkerTask::ContextPreview => {
+                    match result.answer {
+                        Ok(text) => {
+                            self.status = "Context preview ready".into();
+                            self.messages.push(Message {
+                                role: "system",
+                                text,
+                            });
+                        }
+                        Err(error) => {
+                            self.status = error.clone();
+                            self.messages.push(Message {
+                                role: "system",
+                                text: error,
+                            });
+                        }
+                    }
+                    return;
+                }
+                WorkerTask::Chat { patch_mode } => patch_mode,
+            };
             match result.answer {
-                Ok(answer) if result.patch_mode => {
+                Ok(answer) if patch_mode => {
                     let diff = extract_diff(&answer);
                     match validate_patch(&self.root, &diff) {
                         Ok(paths) => {
@@ -853,7 +699,7 @@ fn prompt_lines(buffer: &PromptBuffer) -> Vec<Line<'static>> {
     let cursor_line = buffer.cursor_line();
     let cursor_column = buffer.cursor_column();
     buffer
-        .text
+        .as_str()
         .split('\n')
         .enumerate()
         .map(|(index, content)| {
@@ -889,7 +735,9 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
 }
 
 fn prompt_cursor_visual_row(buffer: &PromptBuffer, width: usize) -> usize {
-    let mut lines = buffer.text[..buffer.cursor].split('\n').collect::<Vec<_>>();
+    let mut lines = buffer.as_str()[..buffer.cursor_byte()]
+        .split('\n')
+        .collect::<Vec<_>>();
     let current_line = lines.pop().unwrap_or_default();
     let preceding_rows = lines
         .into_iter()
@@ -966,7 +814,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "Terminal221b Rust TUI\n\nUsage: terminal221b-tui [WORKSPACE]\n\nSet ANTHROPIC_API_KEY to enable chat.\nSet TERMINAL221B_MODEL to override the default model.\n\nInside the TUI: /help, /crypto, /tools, /scan, /apply <request>, /save <name>, /sessions, /load <name>, /clear, /quit.\n"
+            "Terminal221b Rust TUI\n\nUsage: terminal221b-tui [WORKSPACE]\n\nSet ANTHROPIC_API_KEY to enable chat.\nSet TERMINAL221B_MODEL to override the default model.\n\nInside the TUI: /help, /context, /crypto, /tools, /scan, /apply <request>, /save <name>, /sessions, /load <name>, /clear, /quit.\n"
         );
         return Ok(());
     }
@@ -1058,41 +906,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_buffer_inserts_and_deletes_at_unicode_character_boundaries() {
-        let mut input = PromptBuffer::default();
-        for character in "aé猫".chars() {
-            input.insert(character);
-        }
-        input.move_left();
-        input.backspace();
-        assert_eq!(input.as_str(), "a猫");
-        assert_eq!(input.cursor, "a".len());
-        input.delete();
-        assert_eq!(input.as_str(), "a");
-        assert_eq!(input.cursor, 1);
-    }
-
-    #[test]
-    fn prompt_buffer_moves_across_lines_and_preserves_vertical_column() {
-        let mut input = PromptBuffer::default();
-        for character in "abcd\nxy\n1234".chars() {
-            input.insert(character);
-        }
-        input.move_vertical(false);
-        assert_eq!(&input.as_str()[input.cursor..], "\n1234");
-        input.move_vertical(false);
-        assert_eq!(input.cursor, 4);
-        input.move_vertical(true);
-        assert_eq!(input.cursor, 7);
-        input.move_vertical(true);
-        assert_eq!(input.cursor, input.as_str().len());
-        input.move_home();
-        assert_eq!(input.cursor, 8);
-        input.move_end();
-        assert_eq!(input.cursor, input.as_str().len());
-    }
-
-    #[test]
     fn prompt_cursor_scroll_accounts_for_wrapped_and_wide_characters() {
         let mut input = PromptBuffer::default();
         for character in "abcdefghi\n猫猫猫".chars() {
@@ -1114,23 +927,6 @@ mod tests {
         assert_eq!(page_scroll(Some(12), 5, 12, false), Some(7));
         assert_eq!(page_scroll(Some(2), 5, 12, false), None);
         assert_eq!(page_scroll(None, 5, 0, true), None);
-    }
-
-    #[test]
-    fn workspace_context_skips_dotfiles_secrets_and_symlinks() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("src.rs"), "fn main() {}\n").unwrap();
-        fs::write(root.path().join(".env"), "PRIVATE=not-for-context").unwrap();
-        fs::create_dir(root.path().join(".ssh")).unwrap();
-        fs::write(root.path().join(".ssh/id_key"), "not-for-context").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(root.path().join("src.rs"), root.path().join("linked.rs"))
-            .unwrap();
-
-        let context = collect_context(root.path()).unwrap();
-        assert!(context.contains("fn main"));
-        assert!(!context.contains("PRIVATE"));
-        assert!(!context.contains("not-for-context"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ The CLI sends selected workspace text to Anthropic and requires explicit approva
 
 ## Why it exists
 
-The repository currently implements a single-screen Claude chat prototype. It does not implement the autonomous agents, blockchain integration, local TensorRT inference, or economic loop described in the previous README.
+The mobile app remains a single-screen Claude chat client. Separate TypeScript CLI and Rust TUI packages provide bounded local-workspace context, local security triage, and reviewed patch workflows. The repository does not implement autonomous multi-agent orchestration, blockchain transactions, local TensorRT inference, or an economic loop.
 
 ## Architecture
 
@@ -29,6 +29,18 @@ flowchart TD
       CLI --> LocalScan["Local-only security triage"]
       CLI --> Scope["Bounty scope manifest validation"]
       CLI --> Tools["Installed tool discovery"]
+    end
+    subgraph ShellTUI["Rust shell TUI"]
+      Operator --> TUI["Ratatui + Crossterm"]
+      TUI --> Editor["Unicode prompt editor"]
+      TUI --> Transcript["Local save/list/load"]
+      TUI --> Preview["/context preflight"]
+      Preview --> LocalWorker["Local worker"]
+      LocalWorker --> Paths["Paths + byte sizes only"]
+      TUI --> ChatRequest["Chat request"]
+      ChatRequest --> Worker["Provider worker"]
+      Worker --> Workspace["Bounded workspace context"]
+      Workspace --> API
     end
     Service --> API["Anthropic Messages API"]
     CLI --> API
@@ -99,9 +111,9 @@ The TUI supports multi-turn Anthropic chat, a crypto-focused system prompt via `
 
 Saved sessions contain only user and assistant transcript turns; system messages, the workspace path, automatically collected workspace context, provider configuration, and API keys are not saved. Obvious API-token assignments, bearer tokens, and private-key blocks are redacted before writing, but local transcript files are plain text and this heuristic is not a guarantee that every secret is detected. On Unix, the session directory is restricted to mode `0700` and files to `0600`; on Windows, files use inherited directory permissions. Storage is atomic and local: `$XDG_STATE_HOME/terminal221b/sessions` when set, otherwise `~/.local/state/terminal221b/sessions` on Unix, or `%LOCALAPPDATA%/terminal221b/sessions` on Windows. Session names are limited to 48 lowercase ASCII letters, digits, hyphens, and underscores.
 
-The terminal interface is an actual shell TUI, so it uses Ratatui/Crossterm rather than Tauri. Tauri is a desktop-webview framework; a Tauri desktop wrapper is not part of this terminal release.
+The terminal interface is an actual shell TUI, so it uses Ratatui/Crossterm rather than Tauri. Tauri is a desktop-webview framework; a Tauri desktop wrapper is not part of this terminal release. See the [TUI architecture decision](docs/TUI-ARCHITECTURE.md) for a researched comparison of agent TUI stacks and the reasons this project stays with Rust/Ratatui.
 
-The CLI reads a bounded set of text files (up to 80 files and 256 KB total), skips hidden files, symlinks, dependency/build folders, and common environment files, then sends that context and the prompt to Anthropic. Set `ANTHROPIC_API_KEY` in the shell before using it. Files leave the machine for the configured Anthropic endpoint; do not run it on a workspace you are not willing to share with that provider.
+The TUI command `/context` locally previews the selected workspace file paths and byte sizes without printing source bodies or contacting Anthropic. A future request re-collects context, so the displayed selection may change if files change. The CLI reads a bounded set of text files (up to 80 files and 256 KB total), skips hidden files, symlinks, dependency/build folders, and common environment files, then sends that context and the prompt to Anthropic. Set `ANTHROPIC_API_KEY` in the shell before using it. Files leave the machine for the configured Anthropic endpoint; do not run it on a workspace you are not willing to share with that provider.
 
 To request a code change, add `--apply`. The CLI accepts only a unified diff, rejects workspace traversal, symlink paths, binary diffs, and secret-file destinations, validates the patch with `git apply --check`, shows the diff, and writes only if you type `APPLY`. It never executes model-generated shell commands.
 
@@ -152,7 +164,7 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 ## Status and limitations
 
 - Primary language: TypeScript; the coding TUI is a Rust/Cargo package. The app uses Expo SDK 54, React Native, Zustand, AsyncStorage, SecureStore, and the Anthropic Messages API.
-- Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, and direct text requests.
+- Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, direct text requests, a Rust TUI with local transcript save/list/load, Unicode-aware prompt editing, viewport conversation navigation, and local `/context` disclosure preview.
 - Not implemented: blockchain or Solana transaction features, remote bounty testing, a general autonomous tool loop, TensorRT/local inference, a backend proxy, cross-run session persistence, mobile model selection, streaming, or attachment handling.
 - Chat history remains in AsyncStorage and is not encrypted. Native API keys are stored in OS secure storage. Web API keys are memory-only.
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
@@ -162,10 +174,10 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 
 ## Roadmap
 
-1. Add persistent TUI sessions and configurable model/provider support.
+1. Add cancellable provider requests, streaming responses, and explicit offline/error states.
 2. Add a separate Tauri desktop frontend if there is a clear desktop UX need; the shell TUI remains independent.
-3. Expand local Solana/SVM development profiles; tool discovery alone does not configure or run chain tools.
-4. Improve the TUI editor, conversation navigation, and patch review UX.
+3. Design evidence-backed agent profiles and a typed TUI/provider boundary before adding role-specific prompt behavior.
+4. Expand local Solana/SVM development profiles; tool discovery alone does not configure or run chain tools.
 5. Review and resolve dependency advisories without an untested Expo major upgrade.
 
 ## Support
