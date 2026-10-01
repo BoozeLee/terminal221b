@@ -1,69 +1,12 @@
-import { lstat, realpath } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { assertSafePath } from './path-guard.js';
 
 export type GitApply = (
   workspace: string,
   patch: string,
   checkOnly: boolean
 ) => void;
-
-function withinRoot(root: string, candidate: string): boolean {
-  const pathFromRoot = relative(root, candidate);
-  return pathFromRoot === '' || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== '..');
-}
-
-function isSensitivePath(path: string): boolean {
-  const parts = path.split('/');
-  const basename = parts.at(-1)!.toLowerCase();
-  return (
-    parts.some(
-      (part) =>
-        part.toLowerCase().startsWith('.env') ||
-        part.toLowerCase() === '.ssh' ||
-        part.toLowerCase() === 'secrets' ||
-        part.toLowerCase() === 'credentials'
-    ) ||
-    /\.(pem|key|p12|pfx)$/i.test(basename)
-  );
-}
-
-async function assertSafePath(root: string, path: string): Promise<void> {
-  if (
-    !path ||
-    path.includes('"') ||
-    path.includes('\\') ||
-    isSensitivePath(path) ||
-    isAbsolute(path) ||
-    path.split('/').some((part) => part === '..' || part === '.git')
-  ) {
-    throw new Error(`Patch contains a disallowed path: ${path}`);
-  }
-
-  const destination = resolve(root, path);
-  if (!withinRoot(root, destination)) {
-    throw new Error(`Patch path escapes workspace: ${path}`);
-  }
-
-  const segments = path.split('/');
-  let current = root;
-  for (const [index, segment] of segments.entries()) {
-    current = join(current, segment);
-    try {
-      const stat = await lstat(current);
-      if (stat.isSymbolicLink()) {
-        throw new Error(`Patch path traverses a symbolic link: ${path}`);
-      }
-      if (index < segments.length - 1 && !stat.isDirectory()) {
-        throw new Error(`Patch path parent is not a directory: ${path}`);
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Patch path')) throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      break;
-    }
-  }
-}
 
 export async function validatePatchPaths(
   workspacePath: string,

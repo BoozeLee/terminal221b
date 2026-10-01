@@ -60,6 +60,74 @@ export function parseBountyScope(input: unknown): BountyScopeManifest {
   };
 }
 
+/**
+ * An asset identity is either exact (one canonical HTTPS asset), a wildcard
+ * (the intake source named a pattern, which must never become canonical), or
+ * ambiguous (the value cannot be reduced to one exact asset without a
+ * judgement). Only an exact identity may be tested against a scope manifest, so
+ * a wildcard or ambiguous asset cannot reach the scope gate by accident.
+ */
+export type AssetIdentity =
+  | { status: 'exact'; canonical: string }
+  | { status: 'wildcard'; pattern: string }
+  | { status: 'ambiguous'; reason: string };
+
+/**
+ * Only `*` is read as a glob marker. A `?` or `#` is rejected before the URL is
+ * parsed, because the URL parser silently drops a trailing `?` and would then
+ * hand back a shorter asset than the operator wrote. Dropping a character to make
+ * a value fit is exactly what this function must never do.
+ */
+const WILDCARD = /\*/;
+
+/**
+ * Normalizes an asset exactly as reported. Deliberately narrow: it never widens
+ * to a prefix, never drops a query, fragment, or credential to make a value fit,
+ * and never guesses a TLD. Anything it cannot reduce to one exact HTTPS asset
+ * comes back for an operator to resolve.
+ */
+export function normalizeAsset(original: string): AssetIdentity {
+  if (WILDCARD.test(original)) {
+    return { status: 'wildcard', pattern: original };
+  }
+  if (original.includes('?')) {
+    return { status: 'ambiguous', reason: 'asset carries a query, which may select a different asset' };
+  }
+  if (original.includes('#')) {
+    return { status: 'ambiguous', reason: 'asset carries a fragment' };
+  }
+  let url: URL;
+  try {
+    url = new URL(original);
+  } catch {
+    return { status: 'ambiguous', reason: 'asset is not an absolute URL' };
+  }
+  if (url.protocol !== 'https:') {
+    return { status: 'ambiguous', reason: 'asset is not https' };
+  }
+  if (url.username || url.password) {
+    return { status: 'ambiguous', reason: 'asset carries credentials' };
+  }
+  if (url.search) {
+    return { status: 'ambiguous', reason: 'asset carries a query, which may select a different asset' };
+  }
+  if (url.hash) {
+    return { status: 'ambiguous', reason: 'asset carries a fragment' };
+  }
+  if (!url.hostname.includes('.')) {
+    return { status: 'ambiguous', reason: 'asset host is not fully qualified' };
+  }
+  if (url.pathname === '' || url.pathname === '/') {
+    return { status: 'ambiguous', reason: 'asset names no specific program or repository' };
+  }
+  return { status: 'exact', canonical: `https://${url.host}${url.pathname}`.replace(/\/+$/, '') };
+}
+
+/** The exact canonical asset, or undefined when the identity is not exact. */
+export function canonicalAsset(identity: AssetIdentity): string | undefined {
+  return identity.status === 'exact' ? identity.canonical : undefined;
+}
+
 function pathMatches(scopePath: string, targetPath: string): boolean {
   const prefix = scopePath.endsWith('/') ? scopePath : `${scopePath}/`;
   return targetPath === scopePath || targetPath.startsWith(prefix);
