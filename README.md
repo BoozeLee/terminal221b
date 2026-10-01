@@ -28,6 +28,8 @@ flowchart TD
       Approval --> GitApply["git apply (after approval)"]
       CLI --> LocalScan["Local-only security triage"]
       CLI --> Scope["Bounty scope manifest validation"]
+      CLI --> Dossier["Local case dossier (offline)"]
+      Bundle["Operator case bundle JSON"] --> Dossier
       CLI --> Tools["Installed tool discovery"]
     end
     subgraph ShellTUI["Rust shell TUI"]
@@ -74,6 +76,8 @@ To start the web development server, run `npm run web`. To create the web export
 ### Environment
 
 The mobile app does not load API keys from `.env` files. The terminal CLI reads `ANTHROPIC_API_KEY` from the invoking process environment; never use `EXPO_PUBLIC_*` for secrets because client bundle values are public.
+
+For the full picture — every dependency and why it is here, the complete install and verification ladder for all three surfaces, the TUI module map, the prompt framework, the designer workflow spec, the smart-contract toolchains, and the phase-by-phase integration plan — see the [engineering guide](docs/TERMINAL221B-ENGINEERING-GUIDE.md).
 
 ## Usage
 
@@ -145,7 +149,45 @@ Gitleaks and Bandit scan local files; Semgrep uses bundled local rules with metr
 
 The scope manifest is data for local review only. Wildcards and non-HTTPS targets are rejected; out-of-scope paths override an in-scope path prefix. Terminal221b currently has no remote target-testing feature. Do not test any program asset without checking its current rules and obtaining authorization.
 
+### Local case dossier
+
+```sh
+terminal221b case template > case-bundle.json
+terminal221b case dossier case-bundle.json --now 2026-09-30T12:00:00Z --policy-max-age-days 90
+```
+
+`case dossier` reads one local case bundle and prints a markdown dossier to stdout. It is offline: it makes no network request, contacts no target, and calls no provider. `--now` defaults to the current time and `--policy-max-age-days` defaults to 90; that default is a working threshold for this tool, not a rule from any program.
+
+A bundle carries versioned case, source, evidence, task, approval, confirmation, program, duplicate-search, assessment, and outcome records. Parsing is fail-closed: an unrecognised field or value is an error, never a default. Sign/transfer is not an available capability, an approval, confirmation, outcome, duplicate search, or assessment can only be recorded by a human, a `paid` outcome requires a receipt reference, and a `fact` claim requires deterministic or operator-confirmed verification.
+
+A case reaches the actionable queue only when all of the following hold: its asset normalizes to one exact HTTPS URL and is inside the recorded scope, the policy snapshot it cites is within the freshness limit, the program publishes a bounty for that asset type, a `fact` claim carries deterministic verification, and a `ConfirmationRecord` pins that exact asset to that exact policy snapshot **and** carries a signature that verifies against a key a case store trusts. A wildcard or ambiguous asset is held for review, never queued. A confirmation recorded against a superseded snapshot does not carry over. The asset identity is derived from `assetOriginal` by rule and cannot be supplied independently of it. Without `--store` the gate has no key set and stays shut, so a confirmed case is reported as awaiting a signature rather than as queued.
+
+The dossier splits cases into `ELIGIBLE`, `REVIEW`, `BLOCKED`, and `NOT EVALUATED`, and only eligible cases enter the actionable queue. Every `REVIEW` names what it is waiting on, and a case whose evaluation failed is reported rather than dropped. Ranking uses an ordinal factor vector with no weights and no aggregate score, so there is no expected-payout or payout-probability number anywhere. Factors the bundle cannot determine stay `unknown`, and `unknown` never outranks a known level. `novelty` is derived from a recorded duplicate search, and a search that found nothing scores `medium` rather than `high`, because a search cannot prove absence. An operator assessment may state a level for `impact_fit`, `novelty`, `effort`, or `reward_fit`, must cite a record, and may lower a derived level but never raise it; an assessment that is refused is reported under the case rather than dropped. `impact_fit` and `reward_fit` stay `unknown` unless an assessment cites the program record, because mapping a finding to a published severity category is a human act.
+
+The bundle is the operator's own file, not a case database, and a [local case store](docs/TERMINAL221B-CASE-STORE.md) can hold and vouch for it (see below). Retention classes still record an intention rather than enforce it — nothing is deleted. Freshness is measured from an operator-recorded timestamp, so `freshness: high` is a statement about your record-keeping and not about the policy; [the freshness review](docs/TERMINAL221B-FRESHNESS-REVIEW.md) states the arithmetic, the boundary, and the manual steps the CLI cannot take for you. Untrusted bundle text is stripped of control characters and escaped before it is printed. `case template` prints a fixture bundle built entirely from non-resolvable `example.invalid` URIs. See [the case threat model](docs/TERMINAL221B-CASE-THREAT-MODEL.md) before rendering a bundle from any untrusted source; it records the open findings, chiefly that a signature names a key rather than a person, that only local source digests are recomputed, and that `writablePaths` is validation-at-parse with no executor behind it.
+
 Built-in scans use deterministic local heuristic patterns. Gitleaks and Bandit run only if explicitly selected with `--with-gitleaks` or `--with-bandit`; Gitleaks scans the selected workspace, while Bandit receives the Python source files found by Terminal221b. Both are local-only, capture structured output, discard secret values returned by scanners, and print only the finding path/rule/line. Other discovered analyzers are not invoked automatically.
+
+### Local case store
+
+```sh
+STORE=~/.local/share/terminal221b
+
+terminal221b case store init --store "$STORE" \
+  --public-key operator.pub --key-id operator-key
+terminal221b case sign case-bundle.json --key operator.pem --key-id operator-key > signed.json
+terminal221b case store put signed.json --store "$STORE" --base-dir .
+terminal221b case store get case-exact-in-scope --store "$STORE"
+terminal221b case store verify --store "$STORE"
+```
+
+A local directory holding case bundles: trusted public keys, one file per revision, a content-addressed copy of each, and an append-only transition log. The root defaults to `$XDG_DATA_HOME/terminal221b`; keep it **outside any repository**, because a store inside a git tree commits its attestations and its operator key ids.
+
+`case sign` reads an ed25519 private key from a file you name, signs in memory, and writes only the signed JSON to stdout. The private key is never copied, logged, or written into a bundle or the store; the store holds the public half only, and registering the same key id twice is refused.
+
+`put` verifies before it writes anything, in this order: every provenance link resolves, every human-authored record is signed by a key the store trusts, and every reachable local source's bytes hash to their declared digest. A refusal names the offending records or the source and both digests. `get` and `verify` re-run the same checks, and `verify` additionally compares each stored bundle against the digest recorded when that revision was written.
+
+Local source digests are recomputed; remote ones are not. An `https://` source, and a `file://` URI naming a host, are recorded `unverifiable-here` and are never fetched — the CLI performs no egress — so every put, get, and verify prints the split, e.g. `2 source(s) verified locally, 3 unverifiable here`. `case store retention` ages every stored source against the window its class carries and purges what is past it; no window is built in, because how long data may be kept is an open decision, and a class with no window is reported rather than treated as safe to delete. A signature still names a key rather than a person. [The store document](docs/TERMINAL221B-CASE-STORE.md) has the exact signature bytes, the check order, and the list of things it does not do.
 
 For Omarchy/Arch Linux, `terminal221b setup omarchy --dry-run` prints a package plan. It queries enabled official pacman package metadata but never installs packages, elevates privileges, builds AUR packages, or runs upstream installers. AUR candidates require manual `PKGBUILD` and source review. Gitleaks, Trivy, and cargo-audit are available from official Arch repositories. Foundry's upstream installer verifies release binary hashes; Slither and Semgrep can be isolated with pipx. Solana CLI and Anchor/AVM follow their upstream installation instructions. This project does not install host tools automatically.
 
@@ -164,8 +206,8 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 ## Status and limitations
 
 - Primary language: TypeScript; the coding TUI is a Rust/Cargo package. The app uses Expo SDK 54, React Native, Zustand, AsyncStorage, SecureStore, and the Anthropic Messages API.
-- Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, direct text requests, a Rust TUI with local transcript save/list/load, Unicode-aware prompt editing, viewport conversation navigation, and local `/context` disclosure preview.
-- Not implemented: blockchain or Solana transaction features, remote bounty testing, a general autonomous tool loop, TensorRT/local inference, a backend proxy, cross-run session persistence, mobile model selection, streaming, or attachment handling.
+- Implemented: one chat screen, locally persisted sessions, a native API-key settings field, native secure key storage, direct text requests, a Rust TUI with local transcript save/list/load, Unicode-aware prompt editing, viewport conversation navigation, local `/context` disclosure preview, a local offline case dossier with fail-closed contracts, a signed human-confirmation eligibility gate, derived asset identity, an explainable ordinal rank vector, and a local case store that verifies signatures and recomputes local source digests before accepting a bundle.
+- Not implemented: a configured retention policy (the mechanism is shipped; the windows are open decision 3), any agent, adapter, scheduler, or orchestration, role profiles beyond `analyst` (`scout`, `engineer`, `artist`, and `reviewer` are still labels that select the coding profile, F26), a Textual workbench, remote or read-only external data sources, blockchain or Solana transaction features, remote bounty testing, a general autonomous tool loop, TensorRT/local inference, a backend proxy, cross-run session persistence, mobile model selection, streaming, or attachment handling.
 - Chat history remains in AsyncStorage and is not encrypted. Native API keys are stored in OS secure storage. Web API keys are memory-only.
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
@@ -174,11 +216,13 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 
 ## Roadmap
 
-1. Add cancellable provider requests, streaming responses, and explicit offline/error states.
-2. Add a separate Tauri desktop frontend if there is a clear desktop UX need; the shell TUI remains independent.
-3. Design evidence-backed agent profiles and a typed TUI/provider boundary before adding role-specific prompt behavior.
+1. Write the remaining evidence-backed agent profiles. `analyst` is shipped and reachable through `terminal221b ask --role analyst PROMPT`, rendered from the same `provider-boundary.json` the CLI and the TUI share; the other four roles still select the coding profile (F26). Each one that lands must change no existing output — today's CLI output is the regression test.
+2. Add cancellable provider requests, streaming responses, and explicit offline/error states. The typed boundary that made these possible is already in place; this item is the user-facing half.
+3. Add a separate Tauri desktop frontend if there is a clear desktop UX need; the shell TUI remains independent.
 4. Expand local Solana/SVM development profiles; tool discovery alone does not configure or run chain tools.
 5. Review and resolve dependency advisories without an untested Expo major upgrade.
+6. Keep the open findings in the [case threat model](docs/TERMINAL221B-CASE-THREAT-MODEL.md) closed before a case bundle from an untrusted source is accepted by the store: a signature currently names a key rather than a person (F15), only local source digests are recomputed (F16), and `writablePaths` is validated at parse time with no executor or OS isolation behind it (F17).
+7. Record the retention policy — how long each class may be kept — now that `case store retention` can enforce it, and give the Engineer adapter an isolated worktree. Those are the two remaining reasons Phase 1 stays partially done.
 
 ## Support
 
