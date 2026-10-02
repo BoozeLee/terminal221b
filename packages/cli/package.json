@@ -2,7 +2,7 @@
   "name": "@terminal221b/cli",
   "version": "0.1.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-only",
   "description": "Local-first Terminal221b coding assistant CLI.",
   "type": "module",
   "bin": {
