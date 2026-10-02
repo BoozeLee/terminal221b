@@ -619,11 +619,17 @@ fn case_detail(item: &Case, report: &Report) -> Vec<String> {
     lines.push(String::new());
     lines.push(format!("confirmations ({})", item.confirmations.len()));
     for confirmation in &item.confirmations {
+        // The word is `attested`, not `signed`. This field records that a record
+        // carries an attestation; whether that attestation *verifies* is the
+        // gate's answer, not this row's (F15). `signed=yes` reads as a signature
+        // check, which is the one reading the field cannot support — so the row
+        // states what it is and leaves verification to the gate, which is
+        // already reported in the header.
         lines.push(format!(
-            "· {} · {} · signed={} · {}",
+            "· {} · {} · attested={} · {}",
             safe_text(&confirmation.confirmation_id),
             safe_text(&confirmation.confirmed_at),
-            if confirmation.signed { "yes" } else { "NO" },
+            if confirmation.signed { "yes" } else { "no" },
             match confirmation.key_id.as_deref() {
                 Some(key) => format!("key {key}"),
                 None => "no key named".to_string(),
@@ -639,8 +645,12 @@ fn case_detail(item: &Case, report: &Report) -> Vec<String> {
     lines.push(String::new());
     lines.push(format!("evidence ({})", item.evidence.len()));
     for evidence in &item.evidence {
+        // `verification` here is the operator's own assertion carried by the
+        // bundle, not something this screen recomputed. Labelled as such,
+        // because a bare `deterministic` next to a claim reads as a check that
+        // was performed, and it was not.
         lines.push(format!(
-            "· {} [{} · {} · {}] {}",
+            "· {} [{} · asserted {} · {}] {}",
             safe_text(&evidence.evidence_id),
             safe_text(&evidence.claim_type),
             safe_text(&evidence.verification),
@@ -770,6 +780,49 @@ mod tests {
             "{detail}"
         );
         assert!(!detail.contains("verified locally"), "{detail}");
+    }
+
+    #[test]
+    fn an_attestation_is_not_presented_as_a_signature_check() {
+        // F15: the field records that a record carries an attestation. Whether it
+        // verifies is the gate's answer, reported in the header, so a row reading
+        // `signed=yes` claims a check this screen did not perform. Both halves are
+        // asserted — the honest word present, the misleading one absent — because
+        // asserting only the presence would pass against a row that said both.
+        let report = report_from(MINIMAL);
+        let detail = view(&report, 0).detail.join("\n");
+        assert!(detail.contains("attested=no"), "{detail}");
+        assert!(!detail.contains("signed="), "{detail}");
+    }
+
+    #[test]
+    fn a_signed_confirmation_reads_as_attested_rather_than_verified() {
+        let json = MINIMAL.replace(
+            r#""statement": "read it", "signed": false"#,
+            r#""statement": "read it", "signed": true, "keyId": "key-1""#,
+        );
+        let detail = view(&report_from(&json), 0).detail.join("\n");
+        assert!(detail.contains("attested=yes"), "{detail}");
+        assert!(!detail.contains("signed="), "{detail}");
+        // The key is still named, because a signature proves who held the key and
+        // hiding that would lose evidence the operator needs.
+        assert!(detail.contains("key key-1"), "{detail}");
+    }
+
+    #[test]
+    fn evidence_verification_is_labelled_as_the_bundles_assertion_not_a_check_here() {
+        // `verification` is the operator's own claim, carried by the bundle. A
+        // bare `deterministic` beside a claim reads as a check this screen ran.
+        let json = MINIMAL.replace(
+            r#""evidence": []"#,
+            r#""evidence": [
+              { "evidenceId": "ev-1", "claim": "the page loads", "claimType": "fact",
+                "verification": "deterministic", "sourceId": "src-1",
+                "observedAt": "2026-09-29T00:00:00Z" }
+            ]"#,
+        );
+        let detail = view(&report_from(&json), 0).detail.join("\n");
+        assert!(detail.contains("asserted deterministic"), "{detail}");
     }
 
     #[test]

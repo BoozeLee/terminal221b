@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  loadCaseBundle,
   parseApprovalRecord,
   parseAssessmentRecord,
   parseCaseRecord,
@@ -514,5 +518,55 @@ describe('fixture dataset', () => {
     expect(assets.some((asset) => asset?.includes('vendor-portal'))).toBe(true);
     expect(fixtureBundle.sources.every((item) => item.uri.includes('example.invalid') || item.uri.startsWith('file://') || item.uri.startsWith('local://'))).toBe(true);
     expect(fixtureBundle.evidence.some((item) => item.verification === 'unverified')).toBe(true);
+  });
+});
+
+describe('reading a bundle from disk names each way it can fail', () => {
+  // Guide 7.4 item 3 asks a surface to design its failure states, and "the
+  // source is missing" is one of the three it names. It arrived as a raw
+  // node:fs ENOENT, so the dossier screen had nothing designed to show. These
+  // assert the designed text, and the control asserts the three failures are
+  // genuinely distinct rather than one message reused.
+  const dir = mkdtempSync(join(tmpdir(), 'terminal221b-load-'));
+
+  it('says a missing bundle does not exist, in plain words', async () => {
+    const missing = join(dir, 'not-here.json');
+    await expect(loadCaseBundle(missing)).rejects.toThrow(/does not exist/);
+    await expect(loadCaseBundle(missing)).rejects.toThrow(/No case bundle at/);
+    // The raw Node error is the thing this replaced. If ENOENT text comes back,
+    // the fix has been undone.
+    await expect(loadCaseBundle(missing)).rejects.not.toThrow(/ENOENT/);
+  });
+
+  it('names the path it looked at, so the operator knows which file', async () => {
+    const missing = join(dir, 'named.json');
+    await expect(loadCaseBundle(missing)).rejects.toThrow(missing);
+  });
+
+  it('says a directory is not a bundle', async () => {
+    await expect(loadCaseBundle(dir)).rejects.toThrow(/is a directory, not a case bundle/);
+  });
+
+  it('says malformed JSON is malformed JSON', async () => {
+    const broken = join(dir, 'broken.json');
+    writeFileSync(broken, '{ not json');
+    await expect(loadCaseBundle(broken)).rejects.toThrow(/Invalid case bundle JSON/);
+  });
+
+  it('the control: the three failures read as three different mistakes', async () => {
+    const missing = await loadCaseBundle(join(dir, 'gone.json')).catch((e) => e.message as string);
+    const brokenPath = join(dir, 'also-broken.json');
+    writeFileSync(brokenPath, 'nope');
+    const broken = await loadCaseBundle(brokenPath).catch((e) => e.message as string);
+    const dirError = await loadCaseBundle(dir).catch((e) => e.message as string);
+    const distinct = new Set([missing, broken, dirError]);
+    expect(distinct.size).toBe(3);
+  });
+
+  it('the control: a real bundle still loads', async () => {
+    const good = join(dir, 'good.json');
+    writeFileSync(good, JSON.stringify(fixtureBundle));
+    const loaded = await loadCaseBundle(good);
+    expect(loaded.cases.length).toBe(fixtureBundle.cases.length);
   });
 });

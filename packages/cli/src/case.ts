@@ -1069,10 +1069,40 @@ export function validateCaseBundle(bundle: CaseBundle): string[] {
   return problems;
 }
 
+/**
+ * Reads a bundle from disk, and names each way that can fail.
+ *
+ * The three failures are kept apart on purpose. A path that does not exist, a
+ * file that is not JSON, and JSON that is not a case bundle are three different
+ * operator mistakes with three different fixes, and merging them into one
+ * "could not load" would leave the operator guessing which one they hit.
+ *
+ * A missing file was previously rethrown as the raw `node:fs` ENOENT, which
+ * leaked a Node error into the terminal and gave the dossier screen no designed
+ * state to show for "the source is missing" — one of the three failure states
+ * engineering guide §7.4 item 3 asks a surface to design.
+ */
 export async function loadCaseBundle(path: string): Promise<CaseBundle> {
+  const at = resolve(path);
+  let text: string;
+  try {
+    text = await readFile(at, 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      throw new Error(`No case bundle at ${at}: the file does not exist.`);
+    }
+    if (code === 'EISDIR') {
+      throw new Error(`${at} is a directory, not a case bundle.`);
+    }
+    if (code === 'EACCES') {
+      throw new Error(`${at} cannot be read: permission denied.`);
+    }
+    throw error;
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
+    parsed = JSON.parse(text) as unknown;
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error(`Invalid case bundle JSON: ${error.message}`);
     throw error;

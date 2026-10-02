@@ -162,6 +162,8 @@ The F4 fix makes a human act attributable to a *key*. It does not make it attrib
 
 This is stated rather than fixed because the fix is a key-management policy, not code: per-human keys, a key roster the operator reviews, and for anything load-bearing a second signature. The code's obligation is to not overstate what it has, which it now does not: the dossier's closing list says a signature proves who held the key, not which person typed it.
 
+**That obligation was enforced where it was weakest (2026-10-02).** The caveat lived only in that closing list, so a confirmation row read `signed=yes` in the screen's detail pane — a reading the field cannot support, because it records that a record carries an attestation and not that the attestation verifies. The row now says `attested`, and the test asserts both halves: the honest word present, `signed=` absent. Verification remains the gate's answer and is reported in the header, which is where it already was. The finding stays open, because renaming a field does not make a shared key name a person.
+
 ### F16 — A recomputed digest covers local bytes only. **Open. Low, and it cannot be closed offline.**
 
 `checkSourceDigests` resolves a source to a path and hashes the bytes at that path. That is a real integrity check for anything on this machine, and it is the whole of what it is. Three sources in the shipped fixture fall outside it: an `https://` URI is never fetched (no code path in this slice performs egress, and F8's `authorization_unknown` exists for the phase that would), and a `file://` URI *naming a host* — `file://reports/x.json` — is a remote file, not a local one, so it is recorded `unverifiable-here` rather than guessed at.
@@ -208,6 +210,10 @@ The guard is proven in both directions rather than asserted: `packages/cli/tests
 ### F23 — The shared boundary is a convention held by two readers of one file, not a schema check. **Open by design. Low.**
 
 Nothing verifies at build time that the two clause vocabularies are identical; each side asserts against the shared file independently, so a clause added to only the TypeScript enum is caught by the next test run rather than at compile time, and only if someone remembers to run the other suite. Closing it means a generated vocabulary — one file the compiler reads on both sides — which requires a build step this repository does not have. The cost of not closing it is a drifted clause caught by a test rather than a compiler, which is the right trade for a repository with no codegen. The Expo app is the third surface; it shares the failure vocabulary by type-only import, but its renderer is a duplicate for the reason in F25.
+
+**A second instance of this shape was found and closed (2026-10-02).** The dossier's operator question was a Rust constant at `packages/rust-tui/src/dossier.rs:26` while the markdown export at `packages/cli/src/dossier.ts` had no equivalent — so the export answered a question it never stated. That is this finding exactly, in a different boundary. It is now carried as `operatorQuestion` in the report payload beside `notDoing`, which is the same shared-data remedy already used for the clause set, and `dossier.test.ts` fails if the Rust side grows a constant of its own. The report version moved 1 to 2 so the field could be required: serde parses the whole struct before a version check runs, so a required field on a v1 report would surface as a serde missing-field error an operator cannot act on. `parse_report` therefore reads `version` from the raw JSON first, and a v1 report produces the actionable "the CLI sent version 1, rebuild it" instead.
+
+This finding stays **open for the clause vocabulary itself** — that one still needs codegen, and is unchanged.
 
 ### F24 — The Expo app had its own provider implementation, with no timeout and a catch-all. **Fixed. Medium, with the residual stated as F25.**
 
