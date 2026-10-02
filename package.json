@@ -43,5 +43,13 @@
     "vitest": "^5.0.2"
   },
   "private": true,
-  "license": "AGPL-3.0-only"
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BoozeLee/terminal221b.git"
+  },
+  "homepage": "https://github.com/BoozeLee/terminal221b",
+  "bugs": {
+    "url": "https://github.com/BoozeLee/terminal221b/issues"
+  }
 }

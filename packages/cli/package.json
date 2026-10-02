@@ -19,5 +19,14 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BoozeLee/terminal221b.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/BoozeLee/terminal221b",
+  "bugs": {
+    "url": "https://github.com/BoozeLee/terminal221b/issues"
   }
 }

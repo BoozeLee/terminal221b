@@ -3,7 +3,7 @@
 Terminal221b is an Expo/React Native chat client and an installable, local-first coding CLI.
 The CLI sends selected workspace text to Anthropic and requires explicit approval before applying a proposed diff.
 
-[![CI](https://github.com/Bakery-street-project/Terminal221b/actions/workflows/ci.yml/badge.svg)](https://github.com/Bakery-street-project/Terminal221b/actions/workflows/ci.yml)
+[![CI](https://github.com/BoozeLee/terminal221b/actions/workflows/ci.yml/badge.svg)](https://github.com/BoozeLee/terminal221b/actions/workflows/ci.yml)
 
 ## Why it exists
 
@@ -63,7 +63,7 @@ flowchart TD
 ### Install and run
 
 ```sh
-git clone https://github.com/Bakery-street-project/Terminal221b.git
+git clone https://github.com/BoozeLee/terminal221b.git
 cd Terminal221b
 npm ci
 npm run start
