@@ -23,7 +23,8 @@ use serde::Deserialize;
 
 /// The one operator question this surface answers, printed in the surface
 /// itself. If it cannot state its question it is not a surface yet.
-pub const OPERATOR_QUESTION: &str = "Which cases are actionable, why is each other one held, and what would unblock it?";
+pub const OPERATOR_QUESTION: &str =
+    "Which cases are actionable, why is each other one held, and what would unblock it?";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -271,8 +272,8 @@ pub fn load(path: &str, store: Option<&str>) -> Result<Report, DossierError> {
             detail.to_string()
         }));
     }
-    let report: Report =
-        serde_json::from_slice(&output.stdout).map_err(|error| DossierError::Unreadable(error.to_string()))?;
+    let report: Report = serde_json::from_slice(&output.stdout)
+        .map_err(|error| DossierError::Unreadable(error.to_string()))?;
     if report.version != 1 {
         return Err(DossierError::WrongVersion {
             found: report.version,
@@ -458,7 +459,11 @@ fn asset_line(item: &Case) -> String {
 pub fn view(report: &Report, selected: usize) -> View {
     let header = vec![
         format!("Case dossier · {}", report.now),
-        format!("Policy limit {}d · {}", report.policy_max_age_days, report.signature_trust.label()),
+        format!(
+            "Policy limit {}d · {}",
+            report.policy_max_age_days,
+            report.signature_trust.label()
+        ),
         format!(
             "{} · {} case(s) · {} source(s){}{}",
             if report.provenance.ok {
@@ -507,7 +512,8 @@ pub fn view(report: &Report, selected: usize) -> View {
 /// summarised, so the operator sees the cause and not a verdict on it.
 fn failure_note(report: &Report) -> String {
     if report.provenance.ok && report.signature_trust == SignatureTrust::NoStore {
-        return " · gate closed: no store named, confirmed cases read as awaiting a signature".to_string();
+        return " · gate closed: no store named, confirmed cases read as awaiting a signature"
+            .to_string();
     }
     if report.provenance.ok {
         return String::new();
@@ -567,7 +573,11 @@ fn case_detail(item: &Case, report: &Report) -> Vec<String> {
                 None => "no key named".to_string(),
             }
         ));
-        lines.push(format!("  pins {} @ {}", safe_text(&confirmation.asset), safe_text(&confirmation.policy_snapshot_id)));
+        lines.push(format!(
+            "  pins {} @ {}",
+            safe_text(&confirmation.asset),
+            safe_text(&confirmation.policy_snapshot_id)
+        ));
         lines.push(format!("  {}", safe_text(&confirmation.statement)));
     }
     lines.push(String::new());
@@ -678,7 +688,11 @@ mod tests {
         let rows = rows(&report);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].eligibility, Eligibility::Review);
-        assert!(rows[0].summary.contains("confirmation_unsigned"), "{}", rows[0].summary);
+        assert!(
+            rows[0].summary.contains("confirmation_unsigned"),
+            "{}",
+            rows[0].summary
+        );
     }
 
     #[test]
@@ -694,7 +708,10 @@ mod tests {
     fn a_declared_digest_is_never_presented_as_verified() {
         let report = report_from(MINIMAL);
         let detail = view(&report, 0).detail.join("\n");
-        assert!(detail.contains("declared by the bundle, not re-read here"), "{detail}");
+        assert!(
+            detail.contains("declared by the bundle, not re-read here"),
+            "{detail}"
+        );
         assert!(!detail.contains("verified locally"), "{detail}");
     }
 
@@ -702,7 +719,10 @@ mod tests {
     fn a_missing_store_is_shown_as_a_closed_gate_not_as_a_clean_bill_of_health() {
         let report = report_from(MINIMAL);
         let header = view(&report, 0).header.join("\n");
-        assert!(header.contains("no store: signatures unverified"), "{header}");
+        assert!(
+            header.contains("no store: signatures unverified"),
+            "{header}"
+        );
         assert!(header.contains("gate closed"), "{header}");
     }
 
@@ -721,7 +741,10 @@ mod tests {
     #[test]
     fn an_unevaluated_case_carries_its_reason_instead_of_a_bare_label() {
         let json = MINIMAL
-            .replace(r#""eligibility": "review""#, r#""eligibility": "not_evaluated""#)
+            .replace(
+                r#""eligibility": "review""#,
+                r#""eligibility": "not_evaluated""#,
+            )
             .replace(
                 r#""blocked": [], "awaiting": ["confirmation_unsigned"],"#,
                 r#""blocked": [], "awaiting": [],
@@ -729,8 +752,16 @@ mod tests {
             );
         let report = report_from(&json);
         let screen = view(&report, 0);
-        assert!(screen.rows[0].summary.contains("not evaluated"), "{}", screen.rows[0].summary);
-        assert!(screen.detail.join("\n").contains("NOT EVALUATED"), "{}", screen.detail.join("\n"));
+        assert!(
+            screen.rows[0].summary.contains("not evaluated"),
+            "{}",
+            screen.rows[0].summary
+        );
+        assert!(
+            screen.detail.join("\n").contains("NOT EVALUATED"),
+            "{}",
+            screen.detail.join("\n")
+        );
     }
 
     #[test]
@@ -788,11 +819,18 @@ mod tests {
         // `lines()` is the whole surface, and the boundary footer is part of it,
         // so a check that skipped the footer would pass on a screen that had
         // quietly dropped its own limits.
-        assert!(screen.lines().iter().any(|line| line.contains(OPERATOR_QUESTION)));
-        assert!(screen
-            .lines()
-            .iter()
-            .any(|line| line.contains("does not contact a target")));
+        assert!(
+            screen
+                .lines()
+                .iter()
+                .any(|line| line.contains(OPERATOR_QUESTION))
+        );
+        assert!(
+            screen
+                .lines()
+                .iter()
+                .any(|line| line.contains("does not contact a target"))
+        );
         // Two width rules, and they differ on purpose. The index is the
         // scannable part, so a row is clipped to 80 columns and marked. The
         // detail is prose and wraps. What must never happen is a digest
@@ -822,7 +860,10 @@ mod tests {
     fn a_report_version_this_screen_does_not_know_is_refused_loudly() {
         let json = MINIMAL.replace(r#""version": 1"#, r#""version": 7"#);
         let report: Result<Report, _> = serde_json::from_str(&json);
-        assert!(report.is_ok(), "parsing tolerates it; the version check is explicit");
+        assert!(
+            report.is_ok(),
+            "parsing tolerates it; the version check is explicit"
+        );
         assert!(report.unwrap().version != 1);
     }
 
@@ -854,7 +895,11 @@ mod tests {
         let report = report_from(MINIMAL);
         let screen = view(&report, 99);
         assert_eq!(screen.selected, 0);
-        assert!(screen.detail.join("\n").contains("case-a"), "{:?}", screen.detail);
+        assert!(
+            screen.detail.join("\n").contains("case-a"),
+            "{:?}",
+            screen.detail
+        );
     }
 
     #[test]
@@ -901,6 +946,10 @@ mod tests {
         );
 
         screen.set_selected(1);
-        assert!(screen.detail.join("\n").contains("case-a ·"), "{:?}", screen.detail);
+        assert!(
+            screen.detail.join("\n").contains("case-a ·"),
+            "{:?}",
+            screen.detail
+        );
     }
 }

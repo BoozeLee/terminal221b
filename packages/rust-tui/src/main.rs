@@ -85,7 +85,9 @@ struct WorkerResult {
 }
 
 enum WorkerTask {
-    Chat { patch_mode: bool },
+    Chat {
+        patch_mode: bool,
+    },
     ContextPreview,
     /// Carries the report itself, not a rendered string, so the screen can
     /// re-render it at any width without asking the CLI again. `Err` is the
@@ -139,11 +141,7 @@ fn system_text(profile: &str) -> Result<String, String> {
 }
 
 fn profile_for(crypto_mode: bool) -> &'static str {
-    if crypto_mode {
-        "crypto"
-    } else {
-        "coding"
-    }
+    if crypto_mode { "crypto" } else { "coding" }
 }
 
 fn ask_anthropic(
@@ -163,7 +161,7 @@ fn ask_anthropic(
         Err(error) => {
             return ProviderResult::Err(ProviderFailure::SchemaMismatch {
                 detail: format!("could not create HTTP client: {error}"),
-            })
+            });
         }
     };
     let mut messages = history
@@ -201,17 +199,19 @@ fn ask_anthropic(
     {
         Ok(response) => response,
         Err(error) if error.is_timeout() => {
-            return ProviderResult::Err(ProviderFailure::Timeout { timeout_ms: 120_000 })
+            return ProviderResult::Err(ProviderFailure::Timeout {
+                timeout_ms: 120_000,
+            });
         }
         Err(error) if error.is_connect() => {
             return ProviderResult::Err(ProviderFailure::Network {
                 detail: error.to_string(),
-            })
+            });
         }
         Err(error) => {
             return ProviderResult::Err(ProviderFailure::Network {
                 detail: format!("Anthropic request failed: {error}"),
-            })
+            });
         }
     };
     let status = response.status();
@@ -220,7 +220,7 @@ fn ask_anthropic(
         Err(_) => {
             return ProviderResult::Err(ProviderFailure::InvalidJson {
                 status: status.as_u16(),
-            })
+            });
         }
     };
     if !status.is_success() {
@@ -526,10 +526,12 @@ impl App {
                     Err(error) => Err(ProviderFailure::SchemaMismatch {
                         detail: format!("could not read workspace context: {error}"),
                     }),
-                    Ok(context) => match ask_anthropic(&key, &prompt, &context, crypto_mode, &history) {
-                        ProviderResult::Ok { text, .. } => Ok(text),
-                        ProviderResult::Err(failure) => Err(failure),
-                    },
+                    Ok(context) => {
+                        match ask_anthropic(&key, &prompt, &context, crypto_mode, &history) {
+                            ProviderResult::Ok { text, .. } => Ok(text),
+                            ProviderResult::Err(failure) => Err(failure),
+                        }
+                    }
                 },
             };
             let _ = tx.send(WorkerResult {
@@ -583,8 +585,7 @@ impl App {
         self.scroll = None;
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let report = dossier::load(&path, store.as_deref())
-                .map_err(|error| error.to_string());
+            let report = dossier::load(&path, store.as_deref()).map_err(|error| error.to_string());
             let _ = tx.send(WorkerResult {
                 answer: Ok(String::new()),
                 task: WorkerTask::Dossier { report },
@@ -1004,10 +1005,11 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
         // One scroll offset over the whole screen, so the case list is never
         // scrolled off and the operator loses their anchor.
         let all = dossier_body_lines(&open.view, body_width);
-        let lines: Vec<Line<'static>> = dossier::screen_window(&all, body_height, open.detail_scroll)
-            .into_iter()
-            .map(|line| Line::raw(line.to_string()))
-            .collect();
+        let lines: Vec<Line<'static>> =
+            dossier::screen_window(&all, body_height, open.detail_scroll)
+                .into_iter()
+                .map(|line| Line::raw(line.to_string()))
+                .collect();
         let body = Paragraph::new(Text::from(lines))
             .block(Block::default().borders(Borders::ALL).title("Case dossier"))
             .wrap(Wrap { trim: false });
@@ -1019,8 +1021,11 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Keys"))
         .wrap(Wrap { trim: false });
         frame.render_widget(hint, chunks[2]);
-        let status = Paragraph::new(format!(" {}  ·  Esc closes the dossier  ·  Ctrl-C quit ", app.status))
-            .style(Style::default().fg(Color::DarkGray));
+        let status = Paragraph::new(format!(
+            " {}  ·  Esc closes the dossier  ·  Ctrl-C quit ",
+            app.status
+        ))
+        .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(status, chunks[3]);
         return;
     }
@@ -1317,7 +1322,7 @@ mod tests {
     fn render_app(app: &App, width: u16, height: u16) -> String {
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
-        terminal.draw(|frame| draw(frame, &app)).expect("draws");
+        terminal.draw(|frame| draw(frame, app)).expect("draws");
         // Buffer indexing is (x, y). An earlier version of this test read y in
         // 0..25 against a 24-row buffer and panicked on the bounds check, which
         // was the test's bug and not the screen's.

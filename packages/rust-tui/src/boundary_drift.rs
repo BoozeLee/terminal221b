@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::boundary::{boundary_path, Boundary, BoundaryFile};
+    use crate::boundary::{Boundary, BoundaryFile, boundary_path};
 
     fn load() -> BoundaryFile {
         let raw = std::fs::read_to_string(boundary_path()).expect("the boundary file reads");
@@ -24,12 +24,7 @@ mod tests {
         file.clause_order
             .iter()
             .filter(|clause| wanted.contains(clause))
-            .map(|clause| {
-                file.clauses
-                    .get(clause)
-                    .cloned()
-                    .unwrap_or_default()
-            })
+            .map(|clause| file.clauses.get(clause).cloned().unwrap_or_default())
             .collect::<Vec<String>>()
             .join(" ")
     }
@@ -145,11 +140,7 @@ mod tests {
         let loaded = Boundary::load().expect("the boundary loads");
         let universal = loaded.universal_clauses();
         for name in file.profiles.keys() {
-            let clauses = file
-                .profiles
-                .get(name)
-                .expect("profile is present")
-                .clone();
+            let clauses = file.profiles.get(name).expect("profile is present").clone();
             for required in &universal {
                 assert!(
                     clauses.iter().any(|clause| clause == required),

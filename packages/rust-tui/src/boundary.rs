@@ -83,7 +83,9 @@ impl ProviderFailure {
             ProviderFailure::InvalidJson { status } => {
                 format!("Anthropic returned invalid JSON (HTTP {status})")
             }
-            ProviderFailure::NoTextBlock => "Anthropic response did not contain a text block".to_string(),
+            ProviderFailure::NoTextBlock => {
+                "Anthropic response did not contain a text block".to_string()
+            }
             ProviderFailure::Cancelled { reason } => format!("request cancelled: {reason}"),
             ProviderFailure::UnsupportedCapability { capability } => {
                 format!("this provider does not support {capability}")
@@ -187,7 +189,9 @@ impl Boundary {
             .ok_or_else(|| format!("unknown system profile: {profile}"))?;
         for clause in clauses {
             if !self.file.clauses.contains_key(clause) {
-                return Err(format!("profile {profile} names a clause with no text: {clause}"));
+                return Err(format!(
+                    "profile {profile} names a clause with no text: {clause}"
+                ));
             }
         }
         Ok(clauses.iter().map(String::as_str).collect())
@@ -202,13 +206,7 @@ impl Boundary {
             .clause_order
             .iter()
             .filter(|clause| wanted.contains(&clause.as_str()))
-            .map(|clause| {
-                self.file
-                    .clauses
-                    .get(clause)
-                    .cloned()
-                    .unwrap_or_default()
-            })
+            .map(|clause| self.file.clauses.get(clause).cloned().unwrap_or_default())
             .collect::<Vec<String>>()
             .join(" "))
     }
@@ -249,7 +247,12 @@ mod tests {
             assert!(!rendered.is_empty(), "{profile} rendered nothing");
             for clause in boundary.clauses_of(profile).expect("clauses resolve") {
                 assert!(
-                    !boundary.file.clauses.get(clause).unwrap_or(&String::new()).is_empty(),
+                    !boundary
+                        .file
+                        .clauses
+                        .get(clause)
+                        .unwrap_or(&String::new())
+                        .is_empty(),
                     "{clause} has no text"
                 );
             }
@@ -262,10 +265,7 @@ mod tests {
         for profile in boundary.profiles() {
             let clauses = boundary.clauses_of(profile).expect("clauses resolve");
             for required in boundary.universal_clauses() {
-                assert!(
-                    clauses.contains(&required),
-                    "{profile} dropped {required}"
-                );
+                assert!(clauses.contains(&required), "{profile} dropped {required}");
             }
         }
     }
@@ -317,15 +317,35 @@ mod tests {
     #[test]
     fn exit_codes_branch_on_the_kind_rather_than_on_prose() {
         assert_eq!(ProviderFailure::MissingKey.exit_code(), 2);
-        assert_eq!(ProviderFailure::Cancelled { reason: "x".into() }.exit_code(), 130);
-        assert_eq!(ProviderFailure::HttpError { status: 401, detail: "x".into() }.exit_code(), 4);
-        assert_eq!(ProviderFailure::HttpError { status: 503, detail: "x".into() }.exit_code(), 5);
+        assert_eq!(
+            ProviderFailure::Cancelled { reason: "x".into() }.exit_code(),
+            130
+        );
+        assert_eq!(
+            ProviderFailure::HttpError {
+                status: 401,
+                detail: "x".into()
+            }
+            .exit_code(),
+            4
+        );
+        assert_eq!(
+            ProviderFailure::HttpError {
+                status: 503,
+                detail: "x".into()
+            }
+            .exit_code(),
+            5
+        );
     }
 
     #[test]
     fn the_event_kinds_match_the_wire_format() {
         assert!(AGENT_EVENT_KINDS.contains(&"diff_proposed"));
         assert!(AGENT_EVENT_KINDS.contains(&"approval_required"));
-        assert_eq!(TASK_STATUSES, ["completed", "failed", "cancelled", "blocked"]);
+        assert_eq!(
+            TASK_STATUSES,
+            ["completed", "failed", "cancelled", "blocked"]
+        );
     }
 }
