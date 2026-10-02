@@ -39,7 +39,7 @@
     "@typescript-eslint/eslint-plugin": "^8.71.0",
     "@typescript-eslint/parser": "^8.71.0",
     "eslint": "^10.11.0",
-    "typescript": "~5.9.2",
+    "typescript": "~7.0.2",
     "vitest": "^5.0.2"
   },
   "private": true,
