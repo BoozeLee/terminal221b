@@ -21,15 +21,25 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-/// The one operator question this surface answers, printed in the surface
-/// itself. If it cannot state its question it is not a surface yet.
-pub const OPERATOR_QUESTION: &str =
-    "Which cases are actionable, why is each other one held, and what would unblock it?";
+/// The report version this screen reads.
+///
+/// Bumped to 2 when `operatorQuestion` moved into the payload. That field is
+/// deliberately required rather than optional: this finding (F23) is that a
+/// shared boundary held by two readers of one file is a convention, not a
+/// check, and the previous shape let the question live only in Rust while the
+/// markdown export had none at all. A required field means an old CLI cannot
+/// quietly produce a report this screen accepts, so the skew surfaces here as a
+/// version message that says what to do, instead of as a serde missing-field
+/// error an operator cannot act on.
+pub const REPORT_VERSION: u32 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     pub version: u32,
+    /// The one operator question this surface answers, decided by the CLI beside
+    /// the `notDoing` list it shares, so both renderers read one value.
+    pub operator_question: String,
     pub now: String,
     pub policy_max_age_days: i64,
     pub signature_trust: SignatureTrust,
@@ -238,17 +248,21 @@ impl std::fmt::Display for DossierError {
             ),
             DossierError::WrongVersion { found } => write!(
                 formatter,
-                "this screen reads dossier report version 1, the CLI sent version {found}"
+                "this screen reads dossier report version {REPORT_VERSION}, the CLI sent version {found}; \
+                 rebuild and reinstall the CLI with `npm run build:cli && npm i -g @terminal221b/cli`"
             ),
         }
     }
 }
 
-/// Reads a bundle's report from the installed CLI.
+/// Runs the installed CLI and hands back whatever it printed on stdout.
 ///
-/// The invocation is the seam that already exists: `/scan` and `/tools` reach the
-/// same binary the same way. This adds no second path into the decision.
-pub fn load(path: &str, store: Option<&str>) -> Result<Report, DossierError> {
+/// Split out from parsing so the version and shape branches are reachable from a
+/// test without a real binary on the path. Before the split, `load` shelled out
+/// and parsed in one function, so `WrongVersion` had no path a test could enter
+/// and the branch that protects the operator from a mismatched CLI shipped
+/// untested.
+fn run_cli(path: &str, store: Option<&str>) -> Result<String, DossierError> {
     let mut args = vec![
         "case".to_string(),
         "dossier".to_string(),
@@ -272,14 +286,49 @@ pub fn load(path: &str, store: Option<&str>) -> Result<Report, DossierError> {
             detail.to_string()
         }));
     }
-    let report: Report = serde_json::from_slice(&output.stdout)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Turns the CLI's stdout into a report, refusing anything this screen does not
+/// know how to read. Two distinct refusals, because they mean different things
+/// to an operator: a shape the screen cannot draw, versus a report a newer or
+/// older CLI wrote.
+///
+/// The version is read on its own *before* the struct is parsed. That order is
+/// load-bearing: a version-1 report is missing `operatorQuestion`, so a plain
+/// `from_str::<Report>` would fail serde's missing-field check and the operator
+/// would see "not a dossier report: missing field" instead of the actionable
+/// "the CLI sent version 1, rebuild it". Checking the version first is the whole
+/// reason this function exists in two steps.
+pub fn parse_report(stdout: &str) -> Result<Report, DossierError> {
+    let value: serde_json::Value = serde_json::from_str(stdout)
         .map_err(|error| DossierError::Unreadable(error.to_string()))?;
-    if report.version != 1 {
+    let found = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| DossierError::Unreadable("the report has no numeric version".to_string()))?;
+    if found != u64::from(REPORT_VERSION) {
         return Err(DossierError::WrongVersion {
-            found: report.version,
+            found: found as u32,
         });
     }
+    let report: Report = serde_json::from_value(value)
+        .map_err(|error| DossierError::Unreadable(error.to_string()))?;
+    // The struct parsed from a document whose `version` is REPORT_VERSION, so
+    // this cannot disagree with the check above. It reads the field because the
+    // field is part of the wire shape `dossier.test.ts` asserts on, and an
+    // unread field is a mirror of the report that can rot out of sync with the
+    // pre-read without anyone noticing.
+    debug_assert_eq!(report.version, REPORT_VERSION);
     Ok(report)
+}
+
+/// Reads a bundle's report from the installed CLI.
+///
+/// The invocation is the seam that already exists: `/scan` and `/tools` reach the
+/// same binary the same way. This adds no second path into the decision.
+pub fn load(path: &str, store: Option<&str>) -> Result<Report, DossierError> {
+    run_cli(path, store).and_then(|stdout| parse_report(&stdout))
 }
 
 /// Escapes untrusted text for one line of a fixed-width surface.
@@ -333,6 +382,9 @@ pub struct View {
     pub detail: Vec<String>,
     /// The boundary statement, carried in the surface rather than in a manual.
     pub footer: Vec<String>,
+    /// The question the CLI sent, not a constant this file owns. Held here so
+    /// `lines()` can print it without the screen re-deriving or restating it.
+    pub question: String,
     /// Every case's detail, in the order the rows are in.
     ///
     /// Held per case rather than recomputed per selection because the rows are
@@ -358,7 +410,7 @@ impl View {
     /// boundary the operator reads (guide 7.4, item 6).
     pub fn lines(&self) -> Vec<String> {
         let mut lines = self.header.clone();
-        lines.push(format!("Question: {OPERATOR_QUESTION}"));
+        lines.push(format!("Question: {}", safe_text(&self.question)));
         lines.push("Cases".to_string());
         for (index, row) in self.rows.iter().enumerate() {
             let pointer = if index == self.selected { ">" } else { " " };
@@ -481,7 +533,10 @@ pub fn view(report: &Report, selected: usize) -> View {
         ),
     ];
 
-    let mut footer = vec![format!("Question: {OPERATOR_QUESTION}")];
+    let mut footer = vec![format!(
+        "Question: {}",
+        safe_text(&report.operator_question)
+    )];
     for line in &report.not_doing {
         footer.push(format!("· {}", safe_text(line)));
     }
@@ -502,6 +557,7 @@ pub fn view(report: &Report, selected: usize) -> View {
         detail: Vec::new(),
         details,
         footer,
+        question: report.operator_question.clone(),
     };
     view.set_selected(selected);
     view
@@ -655,7 +711,8 @@ mod tests {
     }
 
     const MINIMAL: &str = r#"{
-      "version": 1,
+      "version": 2,
+      "operatorQuestion": "Which cases are actionable, why is each other one held, and what would unblock it?",
       "now": "2026-09-30T12:00:00Z",
       "policyMaxAgeDays": 90,
       "signatureTrust": "no-store",
@@ -816,14 +873,20 @@ mod tests {
     fn the_screen_states_its_question_and_fits_eighty_columns_before_clipping() {
         let report = report_from(MINIMAL);
         let screen = view(&report, 0);
-        // `lines()` is the whole surface, and the boundary footer is part of it,
-        // so a check that skipped the footer would pass on a screen that had
-        // quietly dropped its own limits.
+        // The question is whatever the CLI sent, so the assertion reads it off
+        // the report rather than a constant — which is also what proves the
+        // screen did not fall back to one of its own.
         assert!(
             screen
                 .lines()
                 .iter()
-                .any(|line| line.contains(OPERATOR_QUESTION))
+                .any(|line| line.contains(&report.operator_question)),
+            "the surface must print the question the CLI sent"
+        );
+        assert!(
+            report.operator_question.ends_with('?'),
+            "an operator question is a question: {}",
+            report.operator_question
         );
         assert!(
             screen
@@ -858,20 +921,50 @@ mod tests {
 
     #[test]
     fn a_report_version_this_screen_does_not_know_is_refused_loudly() {
-        let json = MINIMAL.replace(r#""version": 1"#, r#""version": 7"#);
-        let report: Result<Report, _> = serde_json::from_str(&json);
+        // This used to assert only that parsing tolerates version 7 and that
+        // 7 != 1, which is true of every number. It went through `load` only by
+        // shelling out to a real binary, so the branch that protects an operator
+        // from a mismatched CLI shipped untested. It now enters `parse_report`.
+        let json = MINIMAL.replace(r#""version": 2"#, r#""version": 7"#);
+        let error = parse_report(&json).expect_err("version 7 is not version 2");
+        assert!(matches!(error, DossierError::WrongVersion { found: 7 }));
+        let shown = error.to_string();
+        assert!(shown.contains("version 2"), "{shown}");
+        assert!(shown.contains("version 7"), "{shown}");
         assert!(
-            report.is_ok(),
-            "parsing tolerates it; the version check is explicit"
+            shown.contains("npm i -g"),
+            "the refusal must tell the operator how to fix it, not only that it is wrong: {shown}"
         );
-        assert!(report.unwrap().version != 1);
+    }
+
+    #[test]
+    fn the_version_this_screen_reads_is_refused_rather_than_guessed() {
+        // The other direction, which the old test could not reach: a v1 report
+        // from a CLI that predates `operatorQuestion` must be refused by the
+        // version branch rather than failing as a missing field. The operator
+        // gets one actionable message instead of a serde error.
+        //
+        // Built by deleting the key from parsed JSON rather than by string
+        // surgery on the fixture, so the test cannot silently stop deleting it
+        // because the fixture's whitespace shifted — which is exactly what a
+        // text replace did the first time this test was written.
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(MINIMAL).expect("the fixture is valid JSON");
+        let object = legacy.as_object_mut().expect("the report is an object");
+        object.remove("operatorQuestion");
+        object.insert("version".to_string(), serde_json::json!(1));
+        let error = parse_report(&legacy.to_string()).expect_err("v1 is not version 2");
+        assert!(
+            matches!(error, DossierError::WrongVersion { .. }),
+            "expected the version branch, got: {error}"
+        );
     }
 
     #[test]
     fn a_renamed_or_missing_field_fails_rather_than_rendering_an_empty_row() {
         // An unknown field is additive and tolerated; a missing one is not.
-        let extra = MINIMAL.replace(r#""version": 1,"#, r#""version": 1, "futureField": 1,"#);
-        assert!(report_from(&extra).version == 1);
+        let extra = MINIMAL.replace(r#""version": 2,"#, r#""version": 2, "futureField": 1,"#);
+        assert!(report_from(&extra).version == REPORT_VERSION);
         let missing = MINIMAL.replace(r#""policyMaxAgeDays": 90,"#, "");
         assert!(serde_json::from_str::<Report>(&missing).is_err());
     }

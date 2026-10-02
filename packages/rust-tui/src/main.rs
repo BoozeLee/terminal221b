@@ -1168,7 +1168,8 @@ mod tests {
     /// this side renders the shape the other side produces, and a fixture copied
     /// from a real run is the only one that proves the field names line up.
     const FIXTURE_REPORT: &str = r#"{
-      "version": 1,
+      "version": 2,
+      "operatorQuestion": "Which cases are actionable, why is each other one held, and what would unblock it?",
       "now": "2026-09-30T12:00:00Z",
       "policyMaxAgeDays": 90,
       "signatureTrust": "no-store",

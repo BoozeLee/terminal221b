@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   dossierReport,
+  OPERATOR_QUESTION,
   renderDossier,
   type DossierReport,
   type DossierReportContext,
@@ -37,11 +38,26 @@ function reportFor(context: DossierReportContext = NO_STORE): DossierReport {
 }
 
 /** The digest of the markdown the dossier printed before `--json` existed. */
-const RENDERED_MARKDOWN_SHA256 = '9b0a9c64ba5158239d1b6eb2d5853097e173207caaf984fa973f1a8398069a87';
+// Pinned on 2026-10-02, deliberately moved. The previous value
+// 9b0a9c64ba5158239d1b6eb2d5853097e173207caaf984fa973f1a8398069a87 was the
+// Slice 5 baseline. The markdown now opens with the operator question, because
+// the question lived only in Rust and this export answered a question it never
+// stated (F23). Nothing else in the rendering changed.
+const RENDERED_MARKDOWN_SHA256 = '76897406cf79c502fb256ecb80f1d64c1fe68cb319d38fbc4efb847db8226d5f';
 
 describe('the report the TUI reads is a stated contract, not an accident', () => {
   it('carries the version the screen checks before it trusts anything', () => {
-    expect(reportFor().version).toBe(1);
+    // 2, not 1: version 2 is what carries `operatorQuestion`. A screen still
+    // expecting 1 refuses a report rather than drawing an empty row, which is
+    // the intended behaviour of a contract change and is asserted in the Rust
+    // `parse_report` tests.
+    expect(reportFor().version).toBe(2);
+  });
+
+  it('carries the operator question so the screen and this export agree on it', () => {
+    const report = reportFor();
+    expect(report.operatorQuestion).toBe(OPERATOR_QUESTION);
+    expect(report.operatorQuestion.endsWith('?')).toBe(true);
   });
 
   it('names its evaluation moment and the policy limit that was applied', () => {
@@ -182,6 +198,21 @@ describe('the two implementations of this contract are held together', () => {
       }
     }
     expect(undeclared).toEqual([]);
+  });
+
+  it('the operator question lives here and not in the Rust screen', () => {
+    // F23: a boundary held by two readers of one file is a convention, not a
+    // check. The question was a Rust constant and this export never stated it,
+    // so the screen answered a question the export could not show anyone. It is
+    // now payload, and a second copy on the Rust side would reintroduce the
+    // drift with nothing failing — which is what this catches.
+    //
+    // Asserted against the declaration, not the bare name: this comment names
+    // it, so matching the name alone would always find a hit.
+    expect(rust).not.toContain('const OPERATOR_QUESTION');
+    expect(rust).not.toContain('OPERATOR_QUESTION: &str');
+    expect(rust).toContain('operator_question');
+    expect(rust).toContain('report.operator_question');
   });
 
   it('the allow-lists still name fields this side really has', () => {

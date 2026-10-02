@@ -47,6 +47,20 @@ function safeCell(value: string): string {
 }
 
 /**
+ * The one operator question this surface answers, in one place, beside
+ * {@link WHAT_THIS_DOES_NOT_DO} and for the same reason.
+ *
+ * It used to live only in `packages/rust-tui/src/dossier.rs`, as a Rust
+ * constant. That is finding F23 exactly: a shared boundary held by two readers
+ * of one file is a convention, not a check. The markdown export had no
+ * equivalent, so the question the screen claims to answer was invisible to
+ * anyone who exported the dossier. Both renderers now read this one value, and
+ * `packages/cli/tests/dossier.test.ts` fails if the Rust side grows its own copy.
+ */
+export const OPERATOR_QUESTION =
+  'Which cases are actionable, why is each other one held, and what would unblock it?';
+
+/**
  * The boundary statement, in one place, because two renderers read it.
  *
  * `renderDossier` prints it as markdown and `dossierReport` carries it as data
@@ -93,6 +107,8 @@ export function renderDossier(bundle: CaseBundle, options: EvaluationOptions): s
 
   const lines: string[] = [
     '# Case dossier',
+    '',
+    `Question this dossier answers: ${safe(OPERATOR_QUESTION)}`,
     '',
     `Evaluated at ${options.now} with a policy freshness limit of ${options.policyMaxAgeDays} days.`,
     'Local and offline: nothing was requested from a target, and no payout is estimated.',
@@ -317,7 +333,13 @@ export interface DossierCase {
 }
 
 export interface DossierReport {
-  version: 1;
+  version: 2;
+  /**
+   * The operator question, carried as data so the terminal screen and the
+   * markdown export answer the same question. Required, not optional: a report
+   * that omits it is a report some screen is not being shown what it answers.
+   */
+  operatorQuestion: string;
   now: string;
   policyMaxAgeDays: number;
   signatureTrust: SignatureTrust;
@@ -436,7 +458,8 @@ export function dossierReport(
   });
 
   return {
-    version: 1,
+    version: 2,
+    operatorQuestion: OPERATOR_QUESTION,
     now: options.now,
     policyMaxAgeDays: options.policyMaxAgeDays,
     signatureTrust: context.signatureTrust,
