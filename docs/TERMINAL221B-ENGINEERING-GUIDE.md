@@ -94,12 +94,15 @@ cargo install --path packages/rust-tui --locked
 For development, `npm run tui` (which is `cargo run -p terminal221b-tui --`)
 skips the install step. The install is what puts `terminal221b-tui` on `PATH`.
 
-> **Not verified here.** `AGENTIC-ENGINEERING.md:203-206` lists
-> `cargo fmt --all -- --check`, `cargo test --workspace --locked`,
+> **Verified here on 2026-10-02, with two fixes first.** `AGENTIC-ENGINEERING.md:203-206`
+> lists `cargo fmt --all -- --check`, `cargo test --workspace --locked`,
 > `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
-> `cargo build --workspace --locked` as the CI set. They are the set to run
-> before a broad release. They have not been run against this tree, and this
-> guide does not claim they pass.
+> `cargo build --workspace --locked` as the CI set. All four now pass on this
+> tree. They did not before: `cargo fmt --check` reported three diffs and clippy
+> reported a `needless_borrow` at `main.rs:1320`, both in the Slice 5 dossier
+> screen, because no CI job had ever run them. Note that CI still does not run
+> clippy — see the workflow gap in the roadmap — so the gate is local until that
+> changes.
 
 ### 2.3 The Expo client
 
@@ -130,9 +133,14 @@ plus a documented statement of anything that could not be run.
 | Any shell resource change | plus `npm run lint:shell` |
 | Before a release or a push | all of the above, plus the four cargo commands in §2.2 |
 
-**Measured on this tree at the documented baseline:** 14 test files, 229
-tests, all passing; `npm run lint`, `npm run typecheck` (root and workspace),
-and `npm run build:cli` clean. The four-file case gate is 192 tests.
+**Measured on this tree on 2026-10-02:** 19 test files, 349 tests, all
+passing; `npm run lint`, `npm run typecheck` (root and workspace),
+and `npm run build:cli` clean. The four-file case gate is 226 tests. The four
+cargo commands of §2.2 are also clean on this tree for the first time —
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked
+-- -D warnings`, `cargo test --workspace --locked` (56 tests), and
+`cargo build --workspace --locked` — so the §2.2 "not verified here" note
+above is now obsolete.
 
 The rule, from `AGENTIC-ENGINEERING.md:211`: *do not claim a command passed
 unless it was run on the current tree.* This guide treats that as binding on
@@ -702,15 +710,17 @@ blocks this phase and cannot be answered by engineering.
 | Phase | Integrates | Gate | Binding constraint | State |
 | --- | --- | --- | --- | --- |
 | 0. Contracts and fixtures | `case.ts`, `case-fixtures.ts` | 49 schema and reduction tests, `validateCaseBundle`, three threat-model passes | — | **Done** |
-| 1. Explainable local dossier | the eligibility gate, ordinal vector, manual program snapshot, markdown export, the local case store, retention enforcement | schema tests, provenance invariants, threat-model review — all three pass at 224 tests | **the retention policy itself — open decision 3** | **Partially done** |
+| 1. Explainable local dossier | the eligibility gate, ordinal vector, manual program snapshot, markdown export, the local case store, retention enforcement | schema tests, provenance invariants, threat-model review — all three pass | **the isolated worktree for the Engineer adapter (F17, Phase 3)** — the retention policy is answered | **Partially done** |
 | 2. Textual usability probe | a second operator surface | the §7.4 designer spec, satisfied in one screen | open decision 1 | Not started |
 | 3. Engineer adapter | a provider adapter, an executor, an isolated worktree | a task that runs, fails visibly, and leaves a reviewable change | **F17** — no executor, no OS isolation | Not started |
 | 4. Analyst / Artist handoffs | the Handoff object across roles | evidence-backed agent profiles exist first | the `role` field is still a label | Not started |
-| 5. Outcome accounting | the outcome record and its signature | an outcome can be written, signed, and read back | retention still unenforced | Not started |
+| 5. Outcome accounting | the outcome record and its signature | an outcome can be written, signed, and read back | nothing records an outcome yet | Not started |
 | 6. Read-only external sources | §8.5 | a finding pinned to a recomputed digest | **F16**, and the first egress | Not started |
 
-Phase 1 does not graduate. [README.md](../README.md) roadmap item 7 names the two reasons:
-retention enforcement, and an isolated worktree for the Engineer adapter.
+Phase 1 does not graduate, and there is now **one** reason where there were two.
+Retention enforcement shipped, and its policy is answered (7 / 180 / 180 days,
+archive never). What remains is the isolated worktree for the Engineer adapter,
+which is Phase 3 and finding F17.
 
 ### 9.2 The sequencing rule
 
@@ -718,8 +728,8 @@ From blueprint §11: do **not** start by implementing all three trinity agents
 plus a plugin marketplace plus a generalized autonomous loop plus a chain
 integration. The smallest valuable vertical slice is *local bounty dossier +
 scope freshness gate + evidence-linked ordinal ranking + explicit owner
-review* — and that slice is almost finished. The next slice is retention
-enforcement, not a new surface.
+review* — and that slice is almost finished. Retention enforcement has since
+shipped, so the next slice is the isolated worktree, not a new surface.
 
 ### 9.3 The seams, and the one that does not exist
 
@@ -779,7 +789,7 @@ pass rated the previous ordering "acceptable but not optimal": a provider reques
 with no timeout can hang until the platform gives up, so the one surface not yet
 on the boundary goes before anything that is only a taste question.
 
-### Slice 1 — retention enforcement (mechanism shipped; the policy is still open)
+### Slice 1 — retention enforcement (mechanism and policy both shipped 2026-10-02)
 
 **Done, except for the policy.** `retentionReport` and `purgeExpired` are in
 `store.ts`, exposed as `case store retention`, and the threat model's F10 is
@@ -800,11 +810,13 @@ terminal221b case store retention --store DIR \
   --case-metadata-days 30 --transient-days 7 --local-diff-days 14
 ```
 
-Until someone answers decision 3, every class reports `unconfigured` and nothing
-is purgeable. That is the correct state, not a gap: a tool that hardcoded 30 or
-90 days would be asserting a retention policy nobody approved. **Phase 1 stays
-Partially done until the windows are decided**, and the blueprint now says that
-instead of saying retention is unenforced.
+Decision 3 is answered (2026-10-02): `transient` 7d, `case_metadata` 180d,
+`local_diff` 180d, `operator_archive` never. The windows live in the operator's
+own `retention.json`, recorded with `--record-default-policy`, so nothing is
+expired until the operator has written the file. A class with no window still
+reports `unconfigured` and is still not purgeable. **Phase 1 stays Partially
+done for one reason now, not two:** the isolated worktree for the Engineer
+adapter, which is Phase 3 and F17.
 
 Accept, already satisfied: `npm run lint && npm test && npm run typecheck && npm run build:cli`
 plus the 19 retention tests in `store.test.ts`, and an end-to-end run in

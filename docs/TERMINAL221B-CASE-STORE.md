@@ -152,14 +152,20 @@ terminal221b: writablePaths declares a disallowed path: ../../etc/passwd
 
 **The report mutates nothing.** It lists every source of every stored revision with its class, its age, and one of five statuses: `never-expires` (`operator_archive` has no window, because you chose to keep it), `unconfigured` (no window supplied, or the timestamp is unreadable), `within-window`, `past-window`, and `past-window-newest-revision`.
 
-**No window is built in.** How long outcome data may be kept is open decision 3 in the blueprint, and that is a policy question. So the windows are yours to supply:
+**No window is applied unless you write one.** How long outcome data may be kept was open decision 3 in the blueprint, and that is a policy question. It has since been answered: **`transient` 7 days, `case_metadata` 180 days, `local_diff` 180 days, and `operator_archive` never expires.** The reasoning is in the `DEFAULT_RETENTION_POLICY` docblock in `store.ts`, and the whole answer is a file you own and can edit:
+
+```sh
+terminal221b case store retention --store DIR --record-default-policy
+```
+
+writes `retention.json` into the store, which is then what every report reads. Editing it is a reviewable edit, not a code change. You can also pass windows per-run:
 
 ```sh
 terminal221b case store retention --store DIR \
   --case-metadata-days 30 --transient-days 7 --local-diff-days 14
 ```
 
-A class with no window reports `unconfigured` and is **not** treated as safe to delete. The report says so on its face, because a tool that guessed 30 or 90 days would be asserting a retention policy nobody approved.
+A class with no window reports `unconfigured` and is **not** treated as safe to delete. The report says so on its face, because a class with no window means nobody decided its retention, and treating that as permission to delete would be the tool inventing a policy.
 
 **The purge cannot be blind.** The report prints a token derived from the purgeable set:
 
@@ -184,6 +190,6 @@ Age is measured from `observedAt`, which **you** record. It describes your recor
 - A signature names a **key**, not a person. Anyone who can read the PEM produces a signature the store accepts, and `signedAt` is caller-chosen (F15).
 - Only the two `local://` policy snapshots in the fixture are actually hashed. The other three sources are unreachable here and are reported as such rather than counted as verified (F16).
 - The store can delete a **revision**, not the stale content inside a live one (F21). Retention within the newest revision needs a re-signed revision.
-- The retention **windows are not a default**; until open decision 3 is answered, every class reports `unconfigured` and nothing is purgeable.
+- The retention **windows are yours**, not the tool's. `DEFAULT_RETENTION_POLICY` is the answer to open decision 3 (7 / 180 / 180 days, archive never) and it reaches the store only through a `retention.json` you record. Until that file exists every class reports `unconfigured` and nothing is purgeable.
 - The store is single-process-local. The lock is a pid file; there is no cross-machine store, no server, and no multi-user story.
 - There is no executor, so no contract has yet been acted on (F17).

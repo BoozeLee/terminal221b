@@ -48,6 +48,7 @@ import {
   CaseBundle,
   ConfirmationRecord,
   parseCaseBundle,
+  RETENTION_CLASSES,
   validateCaseBundle,
 } from './case.js';
 
@@ -876,13 +877,16 @@ export function readPublicKeyDer(path: string): KeyObject {
  * (F10). This section makes the intention checkable and enforceable, with two
  * deliberate restraints.
  *
- * **No window is hardcoded.** How long outcome data may be kept is open
- * decision 3 in the blueprint, and it is a policy question, not an engineering
- * one. A module that guessed 30 or 90 days would be asserting a retention
- * policy nobody approved. So the windows arrive as operator input, a class with
- * no window is reported `unconfigured` rather than treated as safe, and
- * `operator_archive` has no window at all because the operator already chose to
- * keep it.
+ * **No window is applied unless the operator wrote one.** How long outcome data
+ * may be kept was open decision 3 in the blueprint. It has since been answered
+ * (7 / 180 / 180 days, and `operator_archive` never), and `DEFAULT_RETENTION_POLICY`
+ * below is that decision — but it is a *starting* policy written into an operator
+ * file by `case store retention --record-default-policy`, not a window applied
+ * behind the operator's back. `retentionReport` itself takes its windows as an
+ * argument and applies nothing of its own: a class with no window is reported
+ * `unconfigured` rather than treated as safe, and `operator_archive` has no
+ * window at all because the operator already chose to keep it. The rule that
+ * matters is that the report never guesses, so purging stays a reviewed act.
  *
  * **Purge removes whole revisions, never single sources.** A bundle's signature
  * covers the whole bundle, so dropping one source out of the middle would
@@ -933,8 +937,6 @@ export interface RetentionWindows {
   case_metadata?: number;
   local_diff?: number;
 }
-
-const RETENTION_CLASSES = ['transient', 'case_metadata', 'local_diff', 'operator_archive'] as const;
 
 function windowFor(windows: RetentionWindows, retention: string): number | undefined {
   if (retention === 'operator_archive') return undefined;
@@ -1105,14 +1107,17 @@ export function purgeExpired(
   });
 }
 
+/**
+ * Re-exported unchanged from the contracts, so `cli.ts` keeps importing the
+ * class list from one place while there is only one definition of it.
+ */
 export { RETENTION_CLASSES };
 
 /**
- * A starting retention policy, and the thing open decision 3 was actually
- * asking for: how long each class may be kept. These numbers are a defensible
- * beginning, not a discovered truth, and they are deliberately kept in a file
- * the operator can edit rather than compiled in, so that changing the policy is
- * a reviewable edit and not a code change.
+ * Open decision 3 answered, on 2026-10-02: **7 / 180 / 180 days, and the archive
+ * never expires.** These numbers are an approved policy, not a discovered truth,
+ * and they stay in a file the operator can edit rather than compiled in, so that
+ * changing the policy is a reviewable edit and not a code change.
  *
  * The reasoning behind each:
  *
@@ -1126,8 +1131,13 @@ export { RETENTION_CLASSES };
  * - `local_diff` 180d. The operator's own work product, the least likely to be
  *   re-creatable and the least likely to be a rights problem, so being generous
  *   costs nothing and losing it costs real work.
- * - `operator_archive` has no window. The operator explicitly chose to keep
- *   their own receipt, and it is their artifact, not a third party's.
+ * - `operator_archive` has no window, by decision rather than by omission. The
+ *   operator explicitly chose to keep their own receipt, and it is their
+ *   artifact, not a third party's.
+ *
+ * Recording this file is what unblocks Phase 1. It does not by itself graduate
+ * Phase 1: README roadmap item 7 also names the isolated worktree, which is
+ * Phase 3.
  */
 export const DEFAULT_RETENTION_POLICY: RetentionWindows = {
   transient: 7,

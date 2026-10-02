@@ -27,6 +27,7 @@ import {
   recordsOfKind,
   resolveStoreRoot,
   retentionReport,
+  RETENTION_CLASSES,
   signBundle,
   signatureInput,
   trustKey,
@@ -1059,6 +1060,27 @@ describe('the retention policy is a file the operator edits, not a code default'
     saveRetentionPolicy(root, DEFAULT_RETENTION_POLICY, FIXTURE_NOW);
     const line = readTransitions(root).find((item) => item.action === 'retention-policy-recorded');
     expect(line?.detail).toMatch(/transient=7d/);
+  });
+
+  /**
+   * The store and the schema now share one `RETENTION_CLASSES`, so a "the two
+   * lists match" test would compare a binding with itself. This is the drift
+   * that survives that fix instead: a class added to the schema without anyone
+   * deciding a window for it. Such a class reports `unconfigured` forever and is
+   * therefore never purged — silently, with no error anywhere. So exactly one
+   * class may lack a window, and it must be the archive.
+   */
+  it('gives every class a window except the one archive the operator keeps forever', () => {
+    const windowless = RETENTION_CLASSES.filter((key) => !(key in DEFAULT_RETENTION_POLICY));
+    expect(windowless).toEqual(['operator_archive']);
+  });
+
+  it('records the approved 7 / 180 / 180 windows rather than a guess', () => {
+    expect(DEFAULT_RETENTION_POLICY).toEqual({
+      transient: 7,
+      case_metadata: 180,
+      local_diff: 180,
+    });
   });
 
   it('refuses a file that names a class the schema does not have', async () => {

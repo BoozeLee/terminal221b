@@ -26,7 +26,14 @@ const SOURCE_KINDS = [
   'scanner_output',
   'operator_note',
 ] as const;
-const RETENTION_CLASSES = [
+/**
+ * The four retention classes, exported because the store enforces a window per
+ * class and the blueprint names them too. It lives here, with the contracts,
+ * so there is exactly one list to extend: a class added to the schema and not to
+ * the store is a class the store silently ignores, and `store.test.ts` guards
+ * that with a test rather than a convention.
+ */
+export const RETENTION_CLASSES = [
   'transient',
   'case_metadata',
   'local_diff',
