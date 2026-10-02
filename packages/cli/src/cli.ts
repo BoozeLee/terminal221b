@@ -3,13 +3,14 @@
 import { createInterface } from 'node:readline/promises';
 import { spawnSync } from 'node:child_process';
 import { stdin, stdout } from 'node:process';
-import { join, resolve } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { runLocalAnalyzers } from './analyzers.js';
 import { askAnthropic } from './anthropic.js';
 import { applyApprovedPatch } from './patch.js';
 import { scanLocalWorkspace } from './security.js';
 import { loadBountyScope } from './scope.js';
-import { loadCaseBundle, validateCaseBundle } from './case.js';
+import { loadCaseBundle, parseTaskContract, validateCaseBundle } from './case.js';
 import { fixtureBundleJson } from './case-fixtures.js';
 import { dossierReport, renderDossier } from './dossier.js';
 import {
@@ -34,6 +35,13 @@ import {
 } from './store.js';
 import { discoverTools } from './tools.js';
 import { collectWorkspaceContext } from './workspace.js';
+import {
+  appendEvents,
+  applyTaskDiff,
+  candidateDiffPath,
+  runTask,
+  taskEventsPath,
+} from './executor.js';
 import { describeFailure, exitCodeFor, type SystemProfile } from './provider.js';
 import {
   AGENT_ROLES,
@@ -60,6 +68,9 @@ Usage:
   terminal221b case store put PATH [--store DIR] [--base-dir DIR] [--entry NAME]
   terminal221b case store get ENTRY [--revision N] [--store DIR] [--base-dir DIR]
   terminal221b case store verify [--store DIR] [--base-dir DIR]
+  terminal221b case task run CONTRACT.json [--workspace PATH] [--base-dir DIR] [--json]
+    [--allow-unsandboxed]
+  terminal221b case task apply CONTRACT.json APPROVAL.json [--workspace PATH] [--store DIR]
   terminal221b case sign PATH --key PRIVATE.pem --key-id ID [--signed-at ISO8601]
   terminal221b tools
   terminal221b setup omarchy --dry-run
@@ -239,6 +250,34 @@ function evaluationOption(args: string[], flag: string, label: string): string |
   const value = args[index + 1];
   if (!value) throw new Error(`${flag} requires ${label}`);
   return value;
+}
+
+/** Every `--flag value` pair in one pass, for a command that takes several at once. */
+function optionsOnly(args: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [index, arg] of args.entries()) {
+    if (!arg.startsWith('--')) continue;
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith('--')) continue;
+    out[arg] = value;
+  }
+  return out;
+}
+
+/**
+ * Only the arguments that are *not* a flag's value. Rejecting anything that does
+ * not start with `--` is wrong here: `--workspace /tmp/repo` is well formed, and a
+ * guard that reads it as a stray positional refuses every real invocation.
+ */
+function positionalsOf(args: string[]): string[] {
+  const out: string[] = [];
+  for (const [index, arg] of args.entries()) {
+    if (arg.startsWith('--')) continue;
+    const previous = args[index - 1];
+    if (previous !== undefined && previous.startsWith('--')) continue;
+    out.push(arg);
+  }
+  return out;
 }
 
 async function showCaseDossier(args: string[]): Promise<void> {
@@ -537,6 +576,109 @@ function launchTui(args: string[]): void {
   }
 }
 
+const TASK_USAGE =
+  'Usage: terminal221b case task run CONTRACT.json [--workspace PATH] [--base-dir DIR] [--json]\n' +
+  '         [--allow-unsandboxed]\n' +
+  '       | case task apply CONTRACT.json APPROVAL.json [--workspace PATH] [--store DIR]';
+
+/** A ```diff fence if the model used one, otherwise the whole answer. One place, so the two callers agree. */
+function patchFromAnswer(answer: string): string {
+  const match = answer.match(/```diff\s*\n([\s\S]*?)```/);
+  return (match?.[1] ?? answer).trim();
+}
+
+/**
+ * Run one task contract and leave a reviewable candidate behind.
+ *
+ * The candidate is written to disk under `.terminal221b/tasks/<taskId>.diff` and
+ * its events to `<taskId>.events.jsonl`, so a later `apply` re-reads the bytes and
+ * can tell whether they are the ones an approval signed. Nothing here writes to
+ * the operator's workspace; that is a separate command with a separate gate.
+ */
+async function runCaseTask(args: string[]): Promise<void> {
+  const [contractPath, ...extra] = positionalsOf(args);
+  if (!contractPath || extra.length > 0) {
+    throw new Error(TASK_USAGE);
+  }
+  const json = optionsOnly(args);
+  const asJson = args.includes('--json');
+  const workspace = resolve(json['--workspace'] ?? process.cwd());
+  const baseDir = resolve(json['--base-dir'] ?? workspace);
+  const allowUnsandboxed = args.includes('--allow-unsandboxed');
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('Set ANTHROPIC_API_KEY in your shell before running a task');
+
+  const contractJson: unknown = JSON.parse(await readFile(contractPath, 'utf8'));
+  const report = await runTask(contractJson, {
+    workspace,
+    baseDir,
+    allowUnsandboxed,
+    propose: async ({ system, prompt, context }) => {
+      const result = await askAnthropic({
+        apiKey,
+        model: process.env.TERMINAL221B_MODEL ?? defaultModel,
+        system,
+        prompt,
+        context: context || '(The contract named no read refs.)',
+      });
+      if (!result.ok) {
+        // The typed failure becomes a thrown error so the exit code still
+        // branches on the kind rather than on prose.
+        throw Object.assign(new Error(describeFailure(result.failure)), {
+          exitCode: exitCodeFor(result.failure),
+        });
+      }
+      return { patch: patchFromAnswer(result.text) };
+    },
+  });
+
+  await mkdir(dirname(taskEventsPath(workspace, report.taskId)), { recursive: true });
+  await writeFile(candidateDiffPath(workspace, report.taskId), report.patch, 'utf8');
+  await appendEvents(taskEventsPath(workspace, report.taskId), report.events);
+
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    console.log(`Task ${report.taskId}: ${report.status}`);
+    console.log(`Read set: ${report.readSet.map((item) => item.ref).join(', ') || '(empty)'}`);
+    console.log(`Changed paths: ${report.changedPaths.join(', ') || '(none)'}`);
+    for (const check of report.checks) {
+      console.log(`  check ${check.passed ? 'passed' : `FAILED (exit ${check.status})`}: ${check.check}`);
+    }
+    for (const failure of report.failures) console.log(`  ${failure}`);
+    console.log(`Candidate diff: ${candidateDiffPath(workspace, report.taskId)}`);
+    console.log(`Digest: ${report.patchDigest}`);
+    console.log(
+      report.isolated
+        ? 'Isolated: the write set was enforced by the filesystem.'
+        : 'NOT ISOLATED: only the path guards applied. F17 stays open for this run.'
+    );
+  }
+  if (report.status !== 'completed') process.exitCode = 1;
+}
+
+/**
+ * Land a candidate diff. The four gates all live in `applyTaskDiff`; this only
+ * reads the bytes off disk so the approval's digest is compared against the file
+ * that will actually be written.
+ */
+async function applyCaseTask(args: string[]): Promise<void> {
+  const [contractPath, approvalPath, ...extra] = positionalsOf(args);
+  if (!contractPath || !approvalPath || extra.length > 0) {
+    throw new Error(TASK_USAGE);
+  }
+  const json = optionsOnly(args);
+  const workspace = resolve(json['--workspace'] ?? process.cwd());
+  const storeRoot = resolveStoreRoot(json['--store']);
+  const contract = parseTaskContract(JSON.parse(await readFile(contractPath, 'utf8')));
+  const approval: unknown = JSON.parse(await readFile(approvalPath, 'utf8'));
+  const diff = await readFile(candidateDiffPath(workspace, contract.taskId), 'utf8');
+
+  const paths = await applyTaskDiff({ workspace, storeRoot, contract, patch: diff, approval });
+  console.log(`Applied an approved change to ${paths.length} workspace path(s): ${paths.join(', ')}`);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command === '--help' || command === '-h' || !command) {
@@ -558,6 +700,8 @@ async function main(): Promise<void> {
     if (args[0] === 'template' && args.length === 1) return printCaseTemplate();
     if (args[0] === 'store') return runCaseStore(args.slice(1));
     if (args[0] === 'sign') return signCaseBundle(args.slice(1));
+    if (args[0] === 'task' && args[1] === 'run') return runCaseTask(args.slice(2));
+    if (args[0] === 'task' && args[1] === 'apply') return applyCaseTask(args.slice(2));
     throw new Error(
       'Usage: terminal221b case dossier PATH [--now ISO8601] [--policy-max-age-days N] [--store DIR] [--json]\n' +
         '       | case template\n' +
@@ -565,6 +709,8 @@ async function main(): Promise<void> {
         '       | case store put PATH [--store DIR] [--base-dir DIR] [--entry NAME]\n' +
         '       | case store get ENTRY [--revision N] [--store DIR] [--base-dir DIR]\n' +
         '       | case store verify [--store DIR] [--base-dir DIR]\n' +
+        '       | case task run CONTRACT.json [--workspace PATH] [--base-dir DIR] [--json] [--allow-unsandboxed]\n' +
+        '       | case task apply CONTRACT.json APPROVAL.json [--workspace PATH] [--store DIR]\n' +
         '       | case sign PATH --key PRIVATE.pem --key-id ID [--signed-at ISO8601]'
     );
   }
@@ -633,8 +779,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const match = answer.match(/```diff\s*\n([\s\S]*?)```/);
-  const patch = (match?.[1] ?? answer).trim();
+  const patch = patchFromAnswer(answer);
   const paths = await applyApprovedPatch(context.root, patch, confirmPatch);
   console.log(`Applied approved changes to ${paths.length} workspace paths.`);
 }

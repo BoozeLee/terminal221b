@@ -144,7 +144,13 @@ $ terminal221b case dossier traversal.json
 terminal221b: writablePaths declares a disallowed path: ../../etc/passwd
 ```
 
-**The limit.** The parser is synchronous and pure. It cannot `lstat` or `realpath`, so a symlinked parent directory inside the workspace still parses; that check lives in `assertSafePath` at patch-apply time. And there is no executor and no OS isolation anywhere in this slice — the guard is enforcement-at-parse, constraining what a contract may declare, with nothing yet consuming the declaration. F17 carries this forward as the binding constraint on the Engineer adapter.
+**The limit of the parser.** The parser is synchronous and pure. It cannot `lstat`
+or `realpath`, so a symlinked parent directory inside the workspace still parses;
+that check lives in `assertSafePath`. **Both halves of that gap are now closed by
+`executor.ts` (F17):** the segment walk runs before a path is treated as a
+permission, against the workspace and again against the task worktree, and the
+write set is then enforced by bubblewrap binding `/` read-only rather than by any
+check in this file.
 
 ## 9. Retention
 
@@ -192,4 +198,4 @@ Age is measured from `observedAt`, which **you** record. It describes your recor
 - The store can delete a **revision**, not the stale content inside a live one (F21). Retention within the newest revision needs a re-signed revision.
 - The retention **windows are yours**, not the tool's. `DEFAULT_RETENTION_POLICY` is the answer to open decision 3 (7 / 180 / 180 days, archive never) and it reaches the store only through a `retention.json` you record. Until that file exists every class reports `unconfigured` and nothing is purgeable.
 - The store is single-process-local. The lock is a pid file; there is no cross-machine store, no server, and no multi-user story.
-- There is no executor, so no contract has yet been acted on (F17).
+- A task run acts on a contract now (F17 closed for the write path), but the actor is a single contract an operator hands the executor by hand. There is no scheduler, no queue, and no orchestration: `role` is still a label on a contract, and nothing reads it to decide who runs.

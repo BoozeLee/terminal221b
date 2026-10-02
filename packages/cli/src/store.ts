@@ -44,6 +44,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ApprovalRecord,
   Attestation,
   CaseBundle,
   ConfirmationRecord,
@@ -538,6 +539,23 @@ export function confirmationSignatureChecker(
   const keys = trustedKeyObjects(manifest);
   return (confirmation) =>
     verifyRecord('confirmation', confirmation as AttestedRecord, keys).status === 'signed';
+}
+
+/**
+ * The same predicate for an approval. It exists separately rather than as a
+ * parameter because the two are different decisions with different blast
+ * radius: a confirmation decides whether a case is eligible, an approval
+ * decides whether bytes reach a workspace. Sharing one function would let a
+ * later change to one silently widen the other, and the caller still has to
+ * check the effect name and the payload digest — a signature alone proves a key
+ * signed, not that it signed *this* diff for *this* task.
+ */
+export function approvalSignatureChecker(
+  manifest: StoreManifest
+): (approval: ApprovalRecord) => boolean {
+  const keys = trustedKeyObjects(manifest);
+  return (approval) =>
+    verifyRecord('approval', approval as AttestedRecord, keys).status === 'signed';
 }
 
 /* -------------------------------------------------------------------------- */

@@ -170,13 +170,27 @@ This is stated rather than fixed because the fix is a key-management policy, not
 
 A declared digest on such a source is therefore still a shape-checked assertion. The store reports those sources as `unverifiable-here` in every `put`, `get`, and `verify` rather than counting them as verified, so an operator reading the summary can see the difference. A future adapter that fetches a remote source must recompute the digest at fetch time and must emit `authorization_unknown` *before* the fetch, not after.
 
-### F17 — The path guard is enforcement-at-parse; there is no executor and no OS isolation. **Open. Low today, high the day something acts on a contract. Binding on Phase 3.**
+### F17 — The path guard was enforcement-at-parse, with no executor and no OS isolation. **Fixed 2026-10-02. Was: low today, high the day something acted on a contract.**
 
-F6 fixed the parse-time tier: a contract that declares a traversal, an absolute path, a `.git` segment, or a sensitive file cannot be constructed. Two gaps remain and neither is closable by adding a check to the parser.
+F6 fixed the parse-time tier: a contract that declares a traversal, an absolute path, a `.git` segment, or a sensitive file cannot be constructed. Two gaps remained and neither was closable by adding a check to the parser.
 
-*The symlink gap.* The parser is synchronous and pure, so it cannot `lstat` a path. A `writablePaths` entry that is lexically clean but whose parent directory is a symlink out of the workspace still parses. The segment walk in `assertSafePath` catches that at patch-apply time; between parse and apply there is a window in which the declaration is not the truth.
+*The symlink gap.* The parser is synchronous and pure, so it cannot `lstat` a path. A `writablePaths` entry that is lexically clean but whose parent directory is a symlink out of the workspace still parsed. The segment walk in `assertSafePath` caught that at patch-apply time; between parse and apply there was a window in which the declaration was not the truth.
 
-*The executor gap, which is the larger one.* No code in this slice opens a path from a task contract. The guard constrains what a contract may *say*; it grants nothing. The day an Engineer adapter reads `writablePaths` as a permission, validation alone stops being the boundary. The blueprint's answer — an isolated worktree per task, with the accepted set enforced by the filesystem rather than by a function — is the requirement on that phase, and this finding is why.
+*The executor gap, which was the larger one.* No code opened a path from a task contract. The guard constrained what a contract *said*; it granted nothing. The day an Engineer adapter read `writablePaths` as a permission, validation alone stopped being the boundary.
+
+**Fix.** `packages/cli/src/executor.ts` exists, and it closes both gaps by acting rather than by checking.
+
+Landing a candidate diff is a separate command, `case task apply`, gated on an `ApprovalRecord` whose `payloadDigest` is the digest of the exact bytes read back from disk and whose attestation verifies against a key a case store trusts. With no store, `readManifest` throws and nothing is applied. The model never writes: it returns a diff, and `acceptanceChecks` are operator-declared commands the executor runs.
+
+The symlink window is closed by running the segment walk *before* a permission is used, twice: once against the operator's workspace and once against the task worktree the sandbox will actually write to, since those are two different filesystems. A lexically clean `writablePaths` entry whose parent is a symlink out of the workspace now refuses before a bind mount exists, and the run is reported `blocked` rather than attempted.
+
+The executor gap is closed by `bwrapSandbox`, which binds `/` **read-only** so the only writable locations in the sandbox are explicit `--bind` mounts built from the resolved write set, and which drops the network namespace so the Research rung of the ladder is off by construction. A write outside the declared set is refused by the kernel rather than by a function. `resolveSandbox` **throws when bubblewrap is absent** rather than falling back, because a silent fallback would have reintroduced this finding while still reporting success; the one way out is the named `--allow-unsandboxed` opt-in, which sets `isolated: false` in the report and writes a `finding` event saying the write set was not enforced.
+
+**The kernel's granularity, stated plainly.** The sandbox mounts **directories**, never files — binding a single file makes it a mount point, and `git apply` unlinks before it rewrites, so a file bind fails `EBUSY` on any patch that touches a file that already exists. So `writablePaths: ['src/app.txt']` mounts `src/`, and the kernel's write set for that task is one directory, not one file. The exact declared set is enforced by the *other* layer, `pathsOutsideWritable` on the diff's changed paths, which is TypeScript rather than the filesystem. The two compose and neither is precise alone; describing the sandbox alone as enforcing the declared set would be false.
+
+**What this does not make true.** The isolation is Linux-and-bubblewrap only; the operator may still pass `--allow-unsandboxed`, and the report says so. `applyTaskDiff` binds the whole workspace read-write when it applies, so `git` itself is trusted with the write — it is constrained by the already-verified path set, not by the sandbox. A task still cannot merge, push, or sign. **F17 is closed for the write path; it is not a claim that the whole surface is contained.**
+
+**How this was found, because the method matters.** The unit tests passed and two of them were genuinely negative controls, yet `case task apply` failed end to end with `EBUSY`. The file bind was only found by running the built CLI against a scratch repository: the tests injected a fake sandbox, and no test performed a real `git apply` through a real mount. The regression test `lands a git apply onto an existing file, which a file bind cannot` now exists, against real `bwrap`.
 
 ### F18 — A `CaseBundle` was not JSON-round-trippable, so the store could not read back its own writes. **Fixed. Medium, found by the store rather than by a test.**
 
@@ -248,10 +262,11 @@ Two things this slice deliberately does not do. It does not accept `--role` on `
 ### F27 — The role vocabulary is duplicated between `case.ts` and `system-prompt.ts`. **Open by design. Low.**
 
 `AGENT_ROLES` in `packages/cli/src/case.ts:37` is not exported, and `system-prompt.ts` needs the same five names to validate `--role` and to key `ROLE_PROFILES`. The slice therefore owns a second literal list. This is F23's shape in a smaller package: a rule in two places, held by a test rather than by the compiler. `role.test.ts` reads the parser's own error string — `role must be one of: scout, analyst, engineer, artist, reviewer` — and asserts it equals the joined list, so a role added to one side without the other fails the suite. The exposure is bounded: a duplicate of five strings whose only consumer is a lookup table, where a mismatch produces a test failure rather than a wrong prompt. Closing it means exporting `AGENT_ROLES`, which is a one-line change to a file that was deliberately out of this slice's scope.
-- That the path guard keeps a write inside the workspace. It keeps a *declaration* legal. Nothing opens a path from a contract yet, and the symlink and isolation limits are F17.
+- That the path guard keeps a write inside the workspace. It keeps a *declaration* legal. The executor now opens those paths, and the write set is enforced by bubblewrap with `/` read-only — but only when bubblewrap is present, and `--allow-unsandboxed` turns that off deliberately (F17).
 - That a role does anything an operator can rely on, except for `analyst`. Four of five roles still select the coding profile (F26), and the role vocabulary is duplicated rather than shared (F27). Selecting a profile is not performing the role: nothing schedules, scopes, or audits an ask by role yet.
 - That the ranking predicts impact, reward, or payout. It has no numeric aggregate and no outcome data. Two of its seven factors are now derivable or assessed (`novelty`, `effort`); `impact_fit` and `reward_fit` are settable only by an assessment that cites the program record, and remain `unknown` otherwise.
-- That any agent exists. The `role` field is a label on a contract. No orchestration, scheduler, or adapter is implemented.
+- That an agent can reach a target. Nothing in a task run opens a socket: the sandbox drops the network namespace, and `resolveSandbox` refuses to run without it. That is a Linux-with-bubblewrap property, not a property of the schema.
+- That any agent exists. The `role` field is a label on a contract. No orchestration or scheduler is implemented; the executor runs one contract the operator hands it.
 - That Phase 2 or later inherits any of this safety. A Textual prototype, a source adapter, or an Engineer adapter each need their own review; the boundaries here are a floor, not a grant.
 
 ## 6. Gate result

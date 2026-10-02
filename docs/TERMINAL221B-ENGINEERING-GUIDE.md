@@ -133,14 +133,27 @@ plus a documented statement of anything that could not be run.
 | Any shell resource change | plus `npm run lint:shell` |
 | Before a release or a push | all of the above, plus the four cargo commands in §2.2 |
 
-**Measured on this tree on 2026-10-02:** 19 test files, 349 tests, all
-passing; `npm run lint`, `npm run typecheck` (root and workspace),
-and `npm run build:cli` clean. The four-file case gate is 226 tests. The four
-cargo commands of §2.2 are also clean on this tree for the first time —
-`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked
--- -D warnings`, `cargo test --workspace --locked` (56 tests), and
+**Measured on this tree on 2026-10-02 (re-measured after the Phase 3 executor
+landed, same day):** 20 test files, 385 tests, all passing; `npm run lint`,
+`npm run typecheck` (root and workspace), `npm run lint:shell` and
+`npm run build:cli` clean. The four-file case gate is 232 tests. The four
+cargo commands of §2.2 are clean: `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`,
+`cargo test --workspace --locked` (60 tests), and
 `cargo build --workspace --locked` — so the §2.2 "not verified here" note
 above is now obsolete.
+
+**A note on what `executor.test.ts` is allowed to skip.** Its bubblewrap cases use
+`it.skipIf`, because a sandbox that does not exist cannot demonstrate isolation.
+That is a real gap on a machine without bubblewrap, not a formality: the suite must
+be read as *green with isolation unproven* when it reports skips, which is why the
+executor also refuses to run at all rather than falling back.
+
+**The four refusals in `applyTaskDiff` were also proven against the built CLI, not
+only against a fake sandbox** — a signed approval lands; a diff edited after signing,
+a missing store, and a signature from an untrusted key each refuse and leave the
+file byte-identical. That end-to-end pass is what caught the file-bind `EBUSY` the
+unit tests could not, because every unit test injected a fake sandbox.
 
 The rule, from `AGENTIC-ENGINEERING.md:211`: *do not claim a command passed
 unless it was run on the current tree.* This guide treats that as binding on
@@ -710,17 +723,19 @@ blocks this phase and cannot be answered by engineering.
 | Phase | Integrates | Gate | Binding constraint | State |
 | --- | --- | --- | --- | --- |
 | 0. Contracts and fixtures | `case.ts`, `case-fixtures.ts` | 49 schema and reduction tests, `validateCaseBundle`, three threat-model passes | — | **Done** |
-| 1. Explainable local dossier | the eligibility gate, ordinal vector, manual program snapshot, markdown export, the local case store, retention enforcement | schema tests, provenance invariants, threat-model review — all three pass | **the isolated worktree for the Engineer adapter (F17, Phase 3)** — the retention policy is answered | **Partially done** |
+| 1. Explainable local dossier | the eligibility gate, ordinal vector, manual program snapshot, markdown export, the local case store, retention enforcement | schema tests, provenance invariants, threat-model review — all three pass | — both reasons answered | **Done (2026-10-02)** — retention enforcement shipped and its policy is answered (7 / 180 / 180 days, archive never); the isolated worktree for the Engineer adapter arrived with Phase 3 |
 | 2. Textual usability probe | a second operator surface | the §7.4 designer spec, satisfied in one screen | ~~open decision 1~~ — answered; the first screen is the case dossier | **Done (2026-10-02)** — the dossier screen satisfies all six §7.4 items. The question had one owner (`operatorQuestion` in the payload, F23 closed); "source is missing" is designed rather than a raw ENOENT; `attested` replaces a misleading `signed`; `verification` is labelled the bundle's assertion. 60 cargo tests, and the screen's assertions run through the real `draw` |
-| 3. Engineer adapter | a provider adapter, an executor, an isolated worktree | a task that runs, fails visibly, and leaves a reviewable change | **F17** — no executor, no OS isolation | Not started |
+| 3. Engineer adapter | a provider adapter, an executor, an isolated worktree | a task that runs, fails visibly, and leaves a reviewable change | streaming status and cancellation | **Gate met (2026-10-02)** — `executor.ts`. A task runs in its own worktree, sees only its `readRefs`, returns a candidate diff that lands nowhere, and fails visibly. F17 closed for the write path: `/` is bound read-only inside bubblewrap so only the declared write set is writable, the network namespace is dropped, and a missing bubblewrap refuses the run rather than falling back. `case task apply` is the §3.3 gate — a signed `ApprovalRecord` committing to the digest of the bytes on disk. Not included: streaming, cancellation, and the Engineer-bay screen |
 | 4. Analyst / Artist handoffs | the Handoff object across roles | evidence-backed agent profiles exist first | the `role` field is still a label | Not started |
 | 5. Outcome accounting | the outcome record and its signature | an outcome can be written, signed, and read back | nothing records an outcome yet | Not started |
 | 6. Read-only external sources | §8.5 | a finding pinned to a recomputed digest | **F16**, and the first egress | Not started |
 
-Phase 1 does not graduate, and there is now **one** reason where there were two.
-Retention enforcement shipped, and its policy is answered (7 / 180 / 180 days,
-archive never). What remains is the isolated worktree for the Engineer adapter,
-which is Phase 3 and finding F17.
+**Phase 1 graduates (2026-10-02).** There were two reasons it did not, and both are
+closed. Retention enforcement shipped and its policy is answered (7 / 180 / 180
+days, archive never). The isolated worktree for the Engineer adapter arrived with
+Phase 3 in `executor.ts`. What that does *not* mean: the write-path isolation is a
+bubblewrap-on-Linux property rather than a schema property, and `--allow-unsandboxed`
+turns it off deliberately.
 
 ### 9.2 The sequencing rule
 
@@ -740,16 +755,29 @@ shipped, so the next slice is the isolated worktree, not a new surface.
 | bundle ↔ dossier | the `confirmationSigned` predicate the CLI injects from the store manifest; absent, the gate stays shut and a confirmed case reads as awaiting a signature | **Shipped** |
 | contract ↔ provider | `ProviderResult` and `ResultEnvelope`, one clause vocabulary rendered from one file by the CLI and the TUI | **Shipped — `provider.ts`, `system-prompt.ts`, `boundary.rs`** |
 | provider ↔ Expo app | `ProviderFailure` imported as a type only, a real `AbortController` timeout, and no catch-all in `ClaudeService.ts` | **Shipped — F24 closed** |
-| contract ↔ executor | nothing. `writablePaths` is validated at parse and **no code acts on it** | **Does not exist — F17, and it is the Phase 3 gate** |
+| contract ↔ executor | `runTask` parses the contract, opens a per-task worktree, materialises only `readRefs`, runs `acceptanceChecks` inside a sandbox, and returns a candidate diff; `applyTaskDiff` is the only thing that writes to the workspace and needs a signed `ApprovalRecord` over the bytes on disk | **Shipped — `executor.ts`, F17 closed for the write path** |
 
-The **last** row is the single most important line in this guide. Every
-`writablePaths` declaration in every bundle is currently a *statement of
-intent*, checked for plausibility and never executed. The two boundary rows
-above it are the prerequisite for closing this one: once a request can be typed
-and a failure can be named, an adapter can be written that refuses to act on a
-path the guard rejected. Both are now shipped, so the boundary is on all three
-surfaces and the executor is the only thing standing between this table and a
-Phase 3.
+The **last** row used to be the single most important line in this guide: every
+`writablePaths` declaration in every bundle was a *statement of intent*, checked
+for plausibility and never executed. The two boundary rows above it were the
+prerequisite — once a request can be typed and a failure can be named, an adapter
+can be written that refuses to act on a path the guard rejected. Both shipped, and
+so did the executor.
+
+**What "acted on" means here, precisely.** `runTask` does not let the model write.
+The provider returns a diff; `executor.ts` validates that diff against both the
+workspace and the contract's declared write set, runs the contract's
+`acceptanceChecks` inside a sandbox, and hands back a candidate. The only thing
+that writes to the operator's workspace is `applyTaskDiff`, and it requires an
+`ApprovalRecord` that commits to the digest of the exact bytes on disk and carries
+a signature from a key a case store trusts. So a `writablePaths` entry is now a
+permission the kernel enforces inside the sandbox rather than a string a parser
+approved — and a permission the operator still has to sign before it lands.
+
+**What is still missing, and is not this row.** Streaming status, cancellation, and
+an Engineer-bay screen. Also two limits worth stating plainly: the isolation is
+bubblewrap-on-Linux, and `--allow-unsandboxed` disables it deliberately, with
+`isolated: false` in the report and a `finding` event in the log.
 
 ### 9.4 Open decisions, and the phase each one blocks
 
@@ -859,9 +887,10 @@ removed and assert the renderer notices, each carrying a control that asserts
 the unmutated file still has it. A guard that has only ever run green has not
 been shown to fire.
 
-**F17 stays open.** The boundary sends a request and reports a result. It
-executes nothing, invokes no tool, and acts on no `writablePaths`. The
-contract-to-executor seam in §9.3 is still the one that does not exist.
+**The provider boundary itself still acts on nothing, and that is correct.** It
+sends a request and reports a result. It executes nothing and invokes no tool. What
+changed is that something now stands behind it: `executor.ts` is the seam that acts
+on a `writablePaths`, and it does so under a sandbox rather than under a function.
 
 **What is not done:** no role profile. That is **Slice 4** below. The Expo app
 adopted the boundary in **Slice 3**, closing F24.
