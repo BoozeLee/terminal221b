@@ -11,14 +11,15 @@
     "build:cli": "npm run build --workspace @terminal221b/cli",
     "tui": "cargo run -p terminal221b-tui --",
     "build:tui": "cargo build --release -p terminal221b-tui",
-    "lint:shell": "shellcheck packages/cli/resources/*.sh",
+    "lint:shell": "shellcheck packages/cli/resources/*.sh scripts/*.sh",
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "test:components": "jest",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",
     "typecheck:tests": "tsc -p packages/cli/tsconfig.test.json",
     "test:count": "./scripts/assert-test-count.sh 390",
-    "build": "expo export --platform web"
+    "build": "expo export --platform web",
+    "test:count:components": "./scripts/assert-component-test-count.sh 4"
   },
   "workspaces": [
     "packages/cli"

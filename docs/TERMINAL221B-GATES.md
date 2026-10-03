@@ -25,6 +25,8 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 | `npm run build` | `quality` | yes |
 | `npm test` | `quality` | yes |
 | executed test count ≥ 390 (384 without a sandbox) | `quality` | yes |
+| `npm run test:components` (jest-expo, `*.jest.tsx`) | `quality` | yes |
+| executed component test count ≥ 4, zero skipped | `quality` | yes |
 | sandbox capability probe | `rust`-adjacent: exercised by `quality` and by `executor.test.ts` | yes |
 | `cargo fmt --all -- --check` | `rust` | yes |
 | `cargo clippy … -D warnings` | `rust` | yes |
@@ -191,6 +193,83 @@ it would judge. The `quality` job installs bubblewrap so the floor is meaningful
 rather than environment-dependent, and the script then asserts bubblewrap is present
 so the floor cannot be satisfied by quietly skipping the six cases it exists to count.
 
+### 3c. Component render coverage — `jest-expo`, and its count floor
+
+The 390-test suite is vitest, and vitest has no React Native preset. So
+`ChatScreen` — 459 lines, the only screen, the surface a user actually touches —
+was never mounted in a single test. Its store and its provider client were
+covered; the thing that draws them was not. The SDK 57 upgrade is what made a
+runner possible, which is why this section exists now and not three commits ago.
+
+**Two runners, separated by filename, not by hope:**
+
+| | globs | count floor |
+|---|---|---|
+| vitest | `vitest.config.ts` → `src/**/*.{test,spec}.{ts,tsx}` | §3, 390/384 |
+| jest | `jest.config.js` → `src/**/*.jest.{ts,tsx}` | this section, 4 |
+
+A component test is named `*.jest.tsx` and vitest cannot match it. Neither
+number is evidence about the other suite.
+
+**One floor here, two in §3.** That asymmetry is the interesting part. §3 has two
+because six tests are `it.skipIf(!sandbox)` and genuinely execute or not
+depending on the host. Nothing in this suite is capability-dependent, so a single
+number is the honest one — and
+`scripts/assert-component-test-count.sh` additionally **fails on any skipped
+test**, so a future capability-gated component test cannot quietly reintroduce
+the two-machine problem. If that check ever starts firing on a legitimate skip,
+the fix is two floors here, not a deleted check.
+
+**Every test awaits.** RNTL v14 made `render`, `fireEvent.*`, `rerender` and
+`unmount` return promises. The synchronous form does not fail loudly: you get a
+Promise back, `screen` is never populated, and the first assertion reports
+"`render` function has not been called" — a message about the test, not the
+screen. All four of these tests failed exactly that way on first run.
+
+**Red proofs.** The floor, and the suite, each shown failing:
+
+```
+$ ./scripts/assert-component-test-count.sh 5
+component tests: 4/4 executed (floor 5)
+::error::only 4 component tests executed, expected at least 5.
+exit 1
+
+$ # one `it` deleted from ChatScreen.jest.tsx
+component tests: 3/3 executed (floor 4)
+::error::only 3 component tests executed, expected at least 4.
+exit 1
+
+$ # one `it.skip`, with a fifth test added so the floor is still satisfied
+component tests: 4/5 executed (floor 4)
+::error::1 component tests were skipped.
+exit 1
+```
+
+And the suite itself, against real regressions rather than a deleted assertion:
+
+```
+$ # swap the two Platform.OS branches in ChatScreen.tsx
+✕ opens settings and states how the API key is handled on this platform
+  Unable to find an element with text: On this device, the key is stored using
+  the operating system secure-storage API.
+        Web builds keep the key in memory only. Do not use a live key in a web build.
+
+$ # drop .replace('claude-', '') from the header subtitle
+✕ names the product and the model when there is no session yet
+  Unable to find an element with text: sonnet-4-5
+          claude-sonnet-4-5
+```
+
+That first mutation is the one worth keeping. The assertion names the **native**
+branch outright instead of matching `/secure-storage|memory only/`, because a
+regex accepting both branches still passes when the two are swapped — and a swap
+is the dangerous direction: a native build telling the user its key is held in
+memory when it is being written to disk.
+
+**Deliberately inside the `quality` job, not a new one.** A separate job buys a
+second 4-minute Node + bubblewrap setup to prove four assertions. It graduates to
+its own job when this suite earns it.
+
 ### 4. gitleaks
 
 ```sh
@@ -345,6 +424,8 @@ npm run lint && npm run lint:shell && npm run typecheck
 npm run build:cli && npm run build
 npm test
 npm run test:count
+npm run test:components
+npm run test:count:components
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

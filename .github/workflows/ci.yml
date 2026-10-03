@@ -82,6 +82,31 @@ jobs:
           set -euo pipefail
           ./scripts/assert-test-count.sh 390 || { echo "::error::test count floor not met"; exit 1; }
 
+      # A SECOND runner, deliberately. vitest has no React Native preset, so
+      # ChatScreen — 459 lines, the only screen, the surface a user actually
+      # touches — had no render coverage at all until the SDK 57 upgrade brought
+      # jest-expo. It lives in *.jest.tsx, which vitest's globs cannot match, so
+      # the two suites never double-count each other and the 390 above stays a
+      # statement about vitest alone.
+      #
+      # Deliberately inside the same job, not a new one: a separate job would add
+      # a second 4-minute Node/bubblewrap setup to prove four assertions. If this
+      # ever grows large enough to justify its own runner, that is the moment.
+      - name: test:components (jest + jest-expo)
+        run: |
+          set -euo pipefail
+          npm run test:components || { echo "::error::component suite failed"; exit 1; }
+
+      # The floor, not the exit code. Four component tests deleted is a green jest
+      # run and a hole in the only render coverage this app has. One floor, not
+      # two: nothing in this suite is capability-dependent, and the script fails
+      # on ANY skip so a future capability-gated test cannot quietly reintroduce
+      # the two-runner problem the two-floor vitest script exists to handle.
+      - name: assert executed component test count
+        run: |
+          set -euo pipefail
+          ./scripts/assert-component-test-count.sh 4 || { echo "::error::component test count floor not met"; exit 1; }
+
   typecheck-tests:
     name: Typecheck the CLI test suite (NON-BLOCKING)
     runs-on: ubuntu-24.04
