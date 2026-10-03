@@ -73,6 +73,24 @@ jobs:
           set -euo pipefail
           npm test || { echo "::error::vitest failed"; exit 1; }
 
+      # Coverage as its own step, deliberately NOT folded into `test` and NOT into
+      # scripts/assert-test-count.sh. Those two must stay able to fail on their own:
+      # the count script runs `npx vitest run` with its own reporters, and adding
+      # instrumentation to it would couple two independent gates and slow both.
+      #
+      # The threshold itself is in vitest.config.ts, not here, for the same reason
+      # the count threshold is not in a config file: a config that judges the tests
+      # is edited by the same change it would judge. This step only supplies the
+      # plugin, which the config cannot install for itself.
+      #
+      # `--coverage` alone is enough. The `include` and the floor both come from the
+      # config; do not restate them on the command line, because a flag here would
+      # silently outrank the config if one of the two is ever edited alone.
+      - name: coverage (v8, lines floor 75)
+        run: |
+          set -euo pipefail
+          npx vitest run --coverage || { echo "::error::line coverage is below the floor in vitest.config.ts"; exit 1; }
+
       # A suite that skips six cases and still exits 0 has not tested anything
       # about those six. This is the floor that says so out loud. The threshold
       # lives here and not in vitest.config.ts on purpose: a config file that

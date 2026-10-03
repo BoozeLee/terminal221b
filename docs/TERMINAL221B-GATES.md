@@ -447,6 +447,69 @@ is redistributed.
 
 ---
 
+### 9. TypeScript line coverage — `npx vitest run --coverage`, floor 75
+
+**75.68% lines (1466/1937), measured 2026-10-03.**
+
+```sh
+npx vitest run --coverage
+```
+
+The floor lives in `vitest.config.ts`, not in CI, for the reason §3 gives: a config file
+that judges the tests is edited by the same change it would judge. The CI step only runs
+the command; the threshold and the `include` both come from the config, and neither is
+restated on the command line, because a flag there would silently outrank the config if
+one of the two were ever edited alone.
+
+**The floor is 75, not 75.68.** This box runs Node 24; CI runs Node 22. A threshold
+pinned to a measured float would go red for a reason that has nothing to do with the
+code, which is the permanently-red-gate failure this file exists to prevent. It is still
+a ratchet: it passes today and any real drop fails, as the second red proof shows.
+
+**Scope is `packages/cli/src` and deliberately not `src/`.** The app is covered by two
+runners. vitest runs `src/services/api/ClaudeService.test.ts` and
+`src/store/chatStore.test.ts`; `src/screens/Chat/ChatScreen.tsx` is rendered only by jest
+through `src/**/*.jest.{ts,tsx}`, which vitest's globs cannot match. Covering `src/**`
+would report `ChatScreen.tsx` as uncovered — a runner artefact, not a coverage gap — and
+a floor computed over it would be measuring the wrong thing. **The app's coverage is not
+in this number**, and pretending otherwise is the specific error this scope prevents.
+
+**Proven red, twice, and the first one raises the floor:**
+
+```
+$ # floor raised to 90, above the measurement
+ERROR: Coverage for lines (75.68%) does not meet global threshold (90%)
+exit 1
+
+$ # 18 lines of unreachable code planted in packages/cli/src/coverage-probe.ts
+Lines : 74.98% ( 1466/1955 )
+ERROR: Coverage for lines (74.98%) does not meet global threshold (75%)
+exit 1
+```
+
+The second proof is the one that matters: the numerator held at 1466 while the
+denominator grew from 1937 to 1955, so the gate is tracking real code rather than
+reporting a constant. It also shows the 0.68-point margin is small enough that 18
+uncovered lines trip it.
+
+**A configuration mistake that would have made this gate lie.** The `coverage` block was
+first written at the top level of `defineConfig`, beside `test`, where **Vitest silently
+ignores it**. The suite then reported **90.20%** instead of 75.68% — not because
+coverage improved, but because the `include` never applied and the 794-line
+`packages/cli/src/cli.ts` dropped out of the denominator. A coverage gate that reports a
+better number when it measures less is worse than no gate, and this one would have passed
+while hiding the repository's largest untested file. `coverage` belongs **under `test`**,
+and `cli.ts` sitting at 0% in the table is the evidence that it is being counted.
+
+**Known shape of the number.** `packages/cli/src/cli.ts` (794 lines, the binary entry
+point, imported by no test) and `provider.ts` are both at 0%. That is 845 of 1937 lines —
+44% of the measured surface with no test at all. The 75.68% is carried by the other
+thirteen files, most of which are above 90%. This is the honest starting point, not a
+result to be proud of, and it is the obvious next target.
+
+Branch (64.97%) and functions (84.69%) are reported by the same command and **not gated**.
+A gate is only worth having if someone collects the number it needs.
+
 ## Action pins
 
 Every action is pinned to a commit SHA with the tag in a trailing comment. A tag is a
