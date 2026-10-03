@@ -322,11 +322,12 @@ apart, so **check the log for `commits scanned` before believing a green here.**
 gate that is randomly red for reasons unrelated to its purpose is as corrosive as one
 that is permanently red: both teach people to re-run instead of read.
 
-**The pin is v2.3.9, and v2 is past its deprecation date.** Verified, not assumed:
+**The pin WAS v2.3.9, and v2 is past its deprecation date.** Verified, not assumed.
+(The v2 line is kept as history; the live pin is v3.0.0, two blocks below.)
 
 ```sh
 gh api repos/gitleaks/gitleaks-action/git/ref/tags/v2.3.9 --jq '.object.sha'
-# ff98106e4c7b2bc287b24eaf42907196329070c7  <- exactly our pin
+# ff98106e4c7b2bc287b24eaf42907196329070c7  <- the pin until 2026-10-03
 gh api repos/gitleaks/gitleaks-action/git/ref/tags/v3.0.0 --jq '.object.sha'
 # e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
 ```
@@ -337,10 +338,19 @@ flag". v3 moves to Node 24 and requires a runner at v2.327.1 or newer. `actions/
 is already pinned at v7 here, which is past the v6 that v3 asks for, so the migration is
 the one-line action swap and nothing else.
 
-This is dated, and it is a supply-chain item, so it is carried into Phase 3 rather than
-fixed inside a docs commit. As of 2026-10-03 the v2 jobs are still running green, so
-enforcement is staged or lagging the announcement — which is a reason to move before it
-is not one.
+**DONE 2026-10-03 — migrated to v3.0.0** (`e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e`).
+v3 moves the action to Node 24, so it is off the removed-Node-20 line entirely.
+`actions/checkout` was already at v7, past the v6 v3 asks for, so the migration was the
+one-line action swap and nothing else. Re-derive both pins:
+
+```sh
+gh api repos/gitleaks/gitleaks-action/git/ref/tags/v3.0.0 --jq '.object.sha'
+# e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+```
+
+The `commits scanned` check above is now a **required** part of accepting a green gitleaks
+run, not a nicety: v2 failed closed on a rate-limited lookup, and a v3 regression of the
+same kind would again present as `[success]` in the job list.
 
 ### 5. `npm run typecheck:tests` — BLOCKING, and green
 
@@ -449,7 +459,7 @@ from annotated tags to the commits they point at.
 | `actions/setup-node` | v7 | `820762786026740c76f36085b0efc47a31fe5020` |
 | `dtolnay/rust-toolchain` | stable | `89b12181fb390509a0842a86cc55eeb8eb928c1d` |
 | `github/codeql-action` | v3 | `1190a975f95ce23525efb6a3fc21ea29567c1b52` |
-| `gitleaks/gitleaks-action` | v2 | `ff98106e4c7b2bc287b24eaf42907196329070c7` |
+| `gitleaks/gitleaks-action` | v3 | `e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e` |
 
 Re-derive:
 
