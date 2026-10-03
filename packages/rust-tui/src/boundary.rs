@@ -1,11 +1,19 @@
 //! The provider boundary, mirrored from the TypeScript side.
 //!
 //! The point of this module is that it is not a second implementation. Both
-//! surfaces read `packages/cli/resources/provider-boundary.json` and render
-//! their system prompt from it, so a clause cannot exist on one side and be
-//! missing on the other without a test failing. That drift already happened
-//! once: the crypto prohibitions were a system prompt here and user text in the
-//! CLI, so the CLI was running the weaker copy of a security boundary.
+//! surfaces render their system prompt from the same policy, so a clause cannot
+//! exist on one side and be missing on the other without a test failing. That
+//! drift already happened once: the crypto prohibitions were a system prompt
+//! here and user text in the CLI, so the CLI was running the weaker copy of a
+//! security boundary.
+//!
+//! "The same policy" is now enforced rather than assumed. The canonical file is
+//! `packages/cli/resources/provider-boundary.json`, which the npm package reads
+//! at runtime. This crate cannot read it at compile time — `include_str!`
+//! cannot reach outside the crate in a published one — so a byte-identical copy
+//! lives at `packages/rust-tui/resources/provider-boundary.json`, and
+//! `scripts/assert-boundary-copies-identical.sh` fails the build if the two
+//! ever differ. See `boundary_source` for the rest of that story.
 //!
 //! This is a request boundary. It sends and reports. It executes nothing, and
 //! finding F17 stays open: there is no executor and no OS isolation behind a
@@ -150,8 +158,21 @@ pub struct Boundary {
 /// path. Embedding makes the file a build input instead: the binary carries it,
 /// and a missing file is a compile error rather than a runtime failure on a
 /// machine that never had it.
+///
+/// The path stays INSIDE the crate. It used to read
+/// `../../cli/resources/provider-boundary.json`, which resolves in this
+/// repository because `packages/cli/` sits beside `packages/rust-tui/`, and
+/// which cannot resolve in a packed crate — a published crate carries only its
+/// own files. That made `terminal221b-tui` impossible to publish, and nothing
+/// noticed until `cargo publish --dry-run` built the packaged crate rather than
+/// the working tree. The canonical file stays in `packages/cli/`, where the npm
+/// package reads it at runtime; the copy beside this one is what makes the
+/// crate self-contained, and
+/// `scripts/assert-boundary-copies-identical.sh` is what stops the two from
+/// drifting apart. That script is the enforcement, so a policy edit that
+/// updates only one copy is a red build rather than a quiet security hole.
 pub fn boundary_source() -> &'static str {
-    include_str!("../../cli/resources/provider-boundary.json")
+    include_str!("../resources/provider-boundary.json")
 }
 
 impl Boundary {

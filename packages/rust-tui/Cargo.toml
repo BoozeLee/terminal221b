@@ -19,6 +19,13 @@ include = [
     "src/**/*.rs",
     "Cargo.toml",
     "README.md",
+    # The crate's own copy of the provider boundary. It MUST be in `include`:
+    # boundary.rs embeds it with include_str!, and a file that is not packaged
+    # is a compile error in the packed crate — which is exactly how this crate
+    # was found to be unpublishable. The canonical copy lives in packages/cli
+    # and scripts/assert-boundary-copies-identical.sh fails the build if the two
+    # ever differ.
+    "resources/provider-boundary.json",
 ]
 
 [[bin]]
