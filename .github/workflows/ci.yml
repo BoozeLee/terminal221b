@@ -63,6 +63,31 @@ jobs:
           set -euo pipefail
           npm run build:cli || { echo "::error::npm run build:cli failed"; exit 1; }
 
+      # "npm pack succeeded" is a claim about npm, not about this package. This
+      # step reads the manifest the tarball actually has and asserts it, so a
+      # package that installs and then does nothing — a bin pointing at an
+      # unbuilt dist/, a missing LICENSE, a test fixture with a fake key in it —
+      # is a red build rather than something a user finds after installing.
+      #
+      # It runs AFTER build:cli on purpose. The gate must never be the thing that
+      # quietly builds what it is judging; `prepare` builds during the pack, so a
+      # stale dist/ would otherwise be masked by the gate doing the work.
+      #
+      # publint is pinned to a version and NOT added to devDependencies: it runs
+      # in one job only, and putting it in devDependencies would make `npm ci`
+      # slower in every job for a gate only this one uses.
+      #
+      # attw is deliberately absent. It reports "This package does not contain
+      # types" and exits 0 on this tarball — it resolves the exports map, and a
+      # bin-only package with no `exports` and no `types` gives it nothing to
+      # check. It cannot go red here, so it is not in the gate. Recorded in
+      # docs/TERMINAL221B-GATES.md section 12.
+      - name: pack gate (tarball manifest + publint)
+        run: |
+          set -euo pipefail
+          ./scripts/assert-tarball-contents.sh || { echo "::error::the published tarball contents are wrong"; exit 1; }
+          npx --yes publint@0.3.25 packages/cli || { echo "::error::publint found a packaging error"; exit 1; }
+
       - name: build (expo export)
         run: |
           set -euo pipefail
@@ -205,6 +230,16 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --workspace --locked || { echo "::error::cargo build failed"; exit 1; }
+
+      # Whether the crate can actually be PUBLISHED, which no gate above answers.
+      # `cargo build` sees the working tree and the workspace around it;
+      # `cargo publish --dry-run` packages the crate and builds the packed
+      # result, which is the question that decides whether a publish succeeds or
+      # fails after the fact. It uploads nothing.
+      - name: crate is publishable (cargo publish --dry-run)
+        run: |
+          set -euo pipefail
+          ./scripts/assert-crate-publishable.sh || { echo "::error::the crate would not publish"; exit 1; }
 
       # Installed the same way cargo-deny already is in the supply-chain job, so
       # this adds no third-party action and leaves the every-action-pinned-to-a-SHA
