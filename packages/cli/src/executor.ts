@@ -103,8 +103,85 @@ export interface SandboxResult {
 
 export type Sandbox = (request: SandboxRequest) => SandboxResult;
 
+/**
+ * Whether a sandbox can actually be built here, and if not, which of two very
+ * different problems it is.
+ *
+ * The distinction is load-bearing. "Bubblewrap is not installed" is a
+ * configuration problem with a known fix. "Bubblewrap is installed and cannot
+ * sandbox" is a capability the host does not have — an older bubblewrap, a
+ * container that denies the network-namespace operations `--unshare-net` needs,
+ * or a kernel without unprivileged user namespaces. They look identical to a
+ * boolean and must not be treated the same way: see `resolveSandbox`.
+ */
+export type SandboxCapability =
+  | { kind: 'ok' }
+  | { kind: 'absent' }
+  | { kind: 'broken'; detail: string };
+
+/**
+ * The minimal invocation that exercises every capability the real sandbox needs.
+ *
+ * `--unshare-net` is here on purpose. It is the flag `bwrapSandbox` adds unless a
+ * caller explicitly opts into the network, and it is the one that fails on a
+ * GitHub ubuntu-24.04 runner with bubblewrap 0.9.0. A probe that omitted it would
+ * pass on exactly the host where every real task fails, which is the same defect
+ * as probing `--version`: a check that cannot fail where the thing fails.
+ */
+const PROBE_ARGV = [
+  '--ro-bind',
+  '/',
+  '/',
+  '--unshare-pid',
+  '--unshare-net',
+  '--dev',
+  '/dev',
+  '--proc',
+  '/proc',
+  '--tmpfs',
+  '/tmp',
+  '--chdir',
+  '/tmp',
+  '--',
+  '/bin/true',
+];
+
+/**
+ * Deliberately not memoised.
+ *
+ * It was, and a cached verdict is what this whole change exists to remove. A memo
+ * turns "can this host sandbox right now" into "what did some earlier call decide",
+ * and in a process that also has a built copy of this module on disk
+ * (`packages/cli/dist/executor.js`) the two copies can disagree: a `bwrap` that
+ * provably works got a cached `absent` and a task was refused for a sandbox that
+ * was there. A wrong cached answer to a security predicate is worse than the spawn
+ * it saves, and the spawn is once per `resolveSandbox` — once per task run, not
+ * once per command.
+ */
+export function probeSandbox(binary: string = SANDBOX_BINARY): SandboxCapability {
+  const result = spawnSync(binary, PROBE_ARGV, { encoding: 'utf8', timeout: 5_000 });
+
+  if (result.error !== undefined) {
+    // A binary that is not there is a different situation from one that is there
+    // and cannot work, and the caller can only respond correctly if told which.
+    const code = (result.error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'EACCES' ? { kind: 'absent' } : {
+      kind: 'broken',
+      detail: result.error.message,
+    };
+  }
+
+  if (result.status === 0) return { kind: 'ok' };
+
+  return {
+    kind: 'broken',
+    detail: (result.stderr ?? '').trim() || `exited ${result.status} with no message`,
+  };
+}
+
+/** True only when a sandbox can really be built. One spawn per call. */
 export function sandboxAvailable(binary: string = SANDBOX_BINARY): boolean {
-  return spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 5_000 }).status === 0;
+  return probeSandbox(binary).kind === 'ok';
 }
 
 /**
@@ -169,15 +246,46 @@ export const runDirectly: Sandbox = (request) => {
  * reintroduce F17 silently — the run would still report success while nothing
  * enforced the write set — so the only way out is a named opt-in, and the run
  * records that it was taken.
+ *
+ * `broken` deliberately does NOT reach the `allowUnsandboxed` branch, even though
+ * a boolean probe cannot tell it apart from `absent`. Those are different
+ * situations and they deserve different answers:
+ *
+ *   absent  — no bubblewrap on this host. The opt-in means "run without a sandbox",
+ *             and the run records `isolated: false`. The caller has asked for that.
+ *   broken  — bubblewrap IS here and cannot enforce anything. Offering the same
+ *             opt-in here would turn a security boundary into a boolean, and it
+ *             would be a regression: before the probe existed, this case selected
+ *             bubblewrap and the task failed. Nothing ran. A caller who opted out
+ *             of isolation on a host with no sandbox binary has not opted out of it
+ *             on a host whose sandbox is silently inert, and did not know there was
+ *             a difference to decline.
+ *
+ * So `broken` throws, and says which of the two it is, because "bubblewrap is not
+ * available" would send someone to install a binary they already have.
  */
 export function resolveSandbox(
-  opts: { sandbox?: Sandbox; allowUnsandboxed?: boolean } = {}
+  opts: { sandbox?: Sandbox; allowUnsandboxed?: boolean; binary?: string } = {}
 ): { sandbox: Sandbox; isolated: boolean } {
   if (opts.sandbox) return { sandbox: opts.sandbox, isolated: false };
-  if (sandboxAvailable()) return { sandbox: bwrapSandbox, isolated: true };
+
+  const binary = opts.binary ?? SANDBOX_BINARY;
+  const capability = probeSandbox(binary);
+
+  if (capability.kind === 'ok') return { sandbox: bwrapSandbox, isolated: true };
+
+  if (capability.kind === 'broken') {
+    throw new Error(
+      `${binary} is installed but cannot create a sandbox: ${capability.detail}. ` +
+        `Nothing runs without the write set being enforced, so this is not a case ` +
+        `allowUnsandboxed covers — it means the host lacks a capability bubblewrap ` +
+        `needs, not that bubblewrap is missing.`
+    );
+  }
+
   if (opts.allowUnsandboxed === true) return { sandbox: runDirectly, isolated: false };
   throw new Error(
-    `${SANDBOX_BINARY} is not available, so no task can run with its write set enforced by the ` +
+    `${binary} is not available, so no task can run with its write set enforced by the ` +
       `filesystem. Install ${SANDBOX_BINARY} (bubblewrap); nothing is run without it.`
   );
 }

@@ -1,9 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { parseTaskContract, type ApprovalRecord } from '../src/case.js';
 import {
@@ -15,9 +23,11 @@ import {
   createTaskWorktree,
   materializeReadSet,
   pathsOutsideWritable,
+  probeSandbox,
   removeTaskWorktree,
   resolveSandbox,
   resolveWritablePaths,
+  runDirectly,
   runTask,
   sandboxAvailable,
   type Sandbox,
@@ -28,11 +38,33 @@ import { initStore, sha256, signRecord, trustKey } from '../src/store.js';
 /**
  * Every negative control here proves a refusal with the real filesystem or a real
  * signature in the way, never with a mock that agrees to refuse. The bubblewrap
- * tests are skipped when it is absent, because a sandbox that does not exist
- * cannot demonstrate isolation — and a test that passes because the thing under
- * test was silently skipped is the exact failure mode this project keeps catching.
+ * tests are skipped when a sandbox cannot actually be built, because a sandbox
+ * that does not exist cannot demonstrate isolation — and a test that passes
+ * because the thing under test was silently skipped is the exact failure mode this
+ * project keeps catching.
+ *
+ * Which kind of "cannot" it is matters, so the reason is printed rather than left
+ * implicit. On a GitHub ubuntu-24.04 runner, bubblewrap 0.9.0 answers `--version`
+ * and then cannot unshare the network, so the sandbox suite there is skipped for
+ * `broken` with bubblewrap's own error, not for `absent` with nothing installed.
+ * `scripts/assert-test-count.sh` reads the same capability and holds the executed
+ * count to 385 or 379 accordingly, so the drop is a gate result and not a shrug.
  */
-const HAS_BWRAP = sandboxAvailable();
+const CAPABILITY = probeSandbox();
+const HAS_BWRAP = CAPABILITY.kind === 'ok';
+
+beforeAll(() => {
+  if (CAPABILITY.kind === 'ok') return;
+  const reason =
+    CAPABILITY.kind === 'absent'
+      ? 'bubblewrap is not installed'
+      : `bubblewrap is present but cannot create a sandbox: ${CAPABILITY.detail}`;
+  console.warn(
+    `\n  sandbox tests SKIPPED (6 of them): ${reason}\n` +
+      `  The executed-count floor is 379 rather than 385 for this reason, not because a lower bar was chosen.\n`
+  );
+});
+
 const NOW = '2026-10-02T00:00:00Z';
 const KEY_ID = 'operator-key';
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -94,6 +126,105 @@ function recordingSandbox(status = 0): { sandbox: Sandbox; requests: SandboxRequ
     },
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* The probe asks whether a sandbox can be made, not whether a binary exists   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Regression suite for a predicate that named one thing and tested another.
+ *
+ * `sandboxAvailable()` used to ask `bwrap --version`, which a present-but-broken
+ * binary answers happily. On a GitHub ubuntu-24.04 runner, bubblewrap 0.9.0
+ * reports its version and then cannot unshare the network and bring up loopback
+ * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`), so the old
+ * check reported "available", the executor claimed `isolated: true`, and every
+ * task then failed at runtime. The working bubblewrap on a developer machine is
+ * 0.12.0, which is why this was green locally and red in CI.
+ */
+describe('the sandbox probe asks whether a sandbox can be made, not whether a binary exists', () => {
+  /** A binary that answers `--version` like the real one, then fails to sandbox. */
+  function brokenStub(dir: string): string {
+    const path = join(dir, 'bwrap-broken');
+    writeFileSync(
+      path,
+      '#!/bin/sh\n' +
+        'if [ "$1" = "--version" ]; then echo "bubblewrap 0.9.0"; exit 0; fi\n' +
+        'echo "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" >&2\n' +
+        'exit 1\n'
+    );
+    chmodSync(path, 0o755);
+    return path;
+  }
+
+  it('calls a present-but-broken bubblewrap broken, not available', () => {
+    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const broken = brokenStub(dir);
+
+    // The assertion that matters: the old `--version` check answers `true` here.
+    expect(sandboxAvailable(broken)).toBe(false);
+
+    const capability = probeSandbox(broken);
+    expect(capability.kind).toBe('broken');
+    if (capability.kind === 'broken') {
+      // The detail has to say something a human can act on. "is not available"
+      // would send them to install a binary they already have.
+      expect(capability.detail).toContain('RTM_NEWADDR');
+    }
+  });
+
+  it('calls a missing binary absent rather than broken', () => {
+    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    expect(probeSandbox(join(dir, 'definitely-not-here')).kind).toBe('absent');
+  });
+
+  it('agrees with a real sandbox on this host, whatever this host is', () => {
+    const capability = probeSandbox();
+
+    if (capability.kind === 'ok') {
+      // A probe that says ok must be backed by an invocation that works.
+      const dir = mkdtempSync(join(tmpdir(), 't221b-probe-'));
+      const result = bwrapSandbox({
+        command: ['/bin/true'],
+        cwd: dir,
+        writable: [{ directory: dir }],
+        network: false,
+      });
+      expect(result.status).toBe(0);
+    } else {
+      // Anything else has to arrive with a reason. A bare `false` is the failure
+      // this suite exists to prevent.
+      expect(capability.kind).not.toBe('ok');
+      if (capability.kind === 'broken') expect(capability.detail.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses to hand the task to the host when bubblewrap is present but broken', () => {
+    // THE fail-open regression. A boolean probe returns false for a broken bwrap,
+    // `allowUnsandboxed` matches on false, and the task runs directly with nothing
+    // enforcing its write set. That is a security boundary turning into a
+    // configuration detail, and it is the whole reason the probe is three-state.
+    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const broken = brokenStub(dir);
+
+    expect(() =>
+      resolveSandbox({ allowUnsandboxed: true, binary: broken })
+    ).toThrowError(/cannot create a sandbox/);
+  });
+
+  it('still hands the task to the host when bubblewrap is genuinely absent', () => {
+    // The opt-out keeps its meaning. `allowUnsandboxed` is about a host with no
+    // sandbox binary, not about a host whose sandbox is broken.
+    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+
+    const resolved = resolveSandbox({
+      allowUnsandboxed: true,
+      binary: join(dir, 'definitely-not-here'),
+    });
+    expect(resolved.isolated).toBe(false);
+    expect(resolved.sandbox).toBe(runDirectly);
+  });
+});
 
 /* -------------------------------------------------------------------------- */
 /* The sandbox enforces the write set rather than describing it                */

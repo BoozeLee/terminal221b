@@ -80,7 +80,7 @@ jobs:
       - name: assert executed test count
         run: |
           set -euo pipefail
-          ./scripts/assert-test-count.sh 385 || { echo "::error::test count floor not met"; exit 1; }
+          ./scripts/assert-test-count.sh 390 || { echo "::error::test count floor not met"; exit 1; }
 
   typecheck-tests:
     name: Typecheck the CLI test suite (NON-BLOCKING)
