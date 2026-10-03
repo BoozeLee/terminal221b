@@ -1005,6 +1005,55 @@ recorded as outstanding in `docs/TERMINAL221B-DONE.md` §3.
 
 ---
 
+## 15. Environmental, not a gate: `rm` does not remove anything on this host
+
+Not a gate, and deliberately not made into one. Recorded because it cost real time
+and it presents as a code regression.
+
+`rm` is a shim at `~/.minimax/shims/rm` that forwards its argument to a trash helper
+**without shell-expanding it**:
+
+```sh
+$ T=$(mktemp -d); rm -rf "$T"
+mavis-trash: '/tmp/$T': No such file or directory
+mavis-trash: no files were moved
+$ [ -d "$T" ] && echo LEAKED
+LEAKED
+```
+
+Every `rm -rf "$VAR"` in this repository was therefore a no-op that reported success.
+The scripts in `scripts/` now resolve `command rm` explicitly (`rm_impl`), which is
+correct on this host and on a normal one.
+
+**What it cost.** The repository had accumulated **25,152** leaked `t221b-*`
+directories under `/tmp`, totalling **880M**. The 32G tmpfs filled, and the next
+`cargo test --workspace --locked` failed **8 tests**:
+
+```
+thread 'session::tests::transcript_round_trips_and_overwrites_atomically' panicked
+  at packages/rust-tui/src/session.rs:440:
+called `Result::unwrap()` on an `Err` value: Os { code: 122,
+  kind: QuotaExceeded, message: "Disk quota exceeded" }
+```
+
+Eight failing tests, in `session.rs` and `workspace.rs` — files no recent change had
+touched. Re-run after clearing `/tmp`: **61 passed, 0 failed.** Nothing in that
+output points at disk space, which is what makes it worth writing down: the natural
+reading is a regression in the boundary fix, and chasing that would have meant
+reverting correct work.
+
+**Also still leaking.** The CLI test suites call `rm -rf` through the same shim from
+TypeScript (`analyzers.test.ts`, `case.test.ts`, `executor.test.ts`, `store.test.ts`),
+so one `npm test` still leaks roughly **6.5M** of fixtures. Not fixed — it is 1/130th
+of what was there, and it is a separate commit so the two are not conflated. The
+number is stated so the current figure is not mistaken for zero.
+
+```sh
+ls -d /tmp/t221b-* 2>/dev/null | wc -l      # 0 at time of writing
+du -csh /tmp/t221b-* 2>/dev/null | tail -1  # 6.5M, from npm test only
+df -h /tmp | tail -1
+```
+
 ## Gates deliberately NOT installed yet
 
 Recorded so their absence reads as a decision rather than an oversight.
