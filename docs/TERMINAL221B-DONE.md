@@ -208,13 +208,15 @@ Without it the fix would have traded a loud failure for a quiet one on a securit
 ls -d /tmp/t221b-* /tmp/terminal221b-* 2>/dev/null | wc -l   # 0
 ```
 
-**Neither package has been published.** `terminal221b-tui` 0.1.0 **is** published — verified by a
-clean `cargo install` into an isolated `CARGO_HOME`, which compiled and ran, and by confirming
-`resources/provider-boundary.json` is inside the downloaded `.crate`. `@terminal221b/cli` is not:
-`npm whoami` is unauthenticated, and the `@terminal221b` scope must be created first. Its first
-publish is permanent — npm's version can be deprecated but never withdrawn, and cargo's "can never
-be overwritten, and the code cannot be deleted" — so each remains a separate authorisation rather
-than something this phase performs on the strength of a plan.
+**One package is published. One is not.** `terminal221b-tui` 0.1.0 **is** on crates.io —
+verified by a clean `cargo install` into an isolated `CARGO_HOME`, which compiled and ran, and by
+confirming `resources/provider-boundary.json` is inside the downloaded `.crate`.
+
+`@terminal221b/cli` is not: `npm whoami` is unauthenticated, and the `@terminal221b` scope must
+be created first. Its first publish is permanent — npm's version can be deprecated but never
+withdrawn, and cargo's is "can never be overwritten, and the code cannot be deleted" — so it
+remains a separate authorisation rather than something this phase performs on the strength of a
+plan.
 
 **Three findings from this phase that are worth more than the two gates:**
 
