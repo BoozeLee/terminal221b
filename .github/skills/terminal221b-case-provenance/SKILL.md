@@ -25,12 +25,26 @@ remaining risk actually lives.
 - `packages/cli/tests/store.test.ts` (101 tests) — the store's own suite.
 - `docs/TERMINAL221B-CASE-STORE.md` — the format.
 
-**The threat model has 27 findings, F1–F27. Not F29.** F28 (the two-language
-contract between `dossierReport` and the Rust reader) and F29 (the screen must never
-re-derive the gate) were specified in September 2026 and **were never written into
-the threat model**. If a document or a conversation refers to them, treat them as
-unspecified, not as existing sections. Adding them is outstanding work, and it
-belongs with the provenance work rather than as a footnote.
+**The threat model has 27 findings, F1–F27. It stops at F27, and that is not a gap
+in the work.** F28 (the two-language `dossierReport`/Rust-reader contract) and F29
+(the screen must never re-derive the gate) were specified by number in September
+2026 and never minted as standalone findings. Both conditions are implemented and
+documented under other numbers:
+
+- The **F28** condition is the second instance recorded under **F23**, found and
+  closed 2026-10-02 — the operator question was a Rust constant while the markdown
+  export had no equivalent. It is now a required `operatorQuestion` field with
+  `REPORT_VERSION` 2, and `dossier.test.ts` fails if Rust grows its own constant.
+- The **F29** condition is the contract at the top of
+  `packages/rust-tui/src/dossier.rs`: *"a reader, never a judge."* It is
+  **structurally** enforced, not merely documented — the module imports only
+  `std::process::Command` and `serde::Deserialize`, so there is no import path from
+  the Rust screen to the TypeScript eligibility gate. The report arrives whole over
+  `terminal221b case dossier PATH --json`; the screen decides only layout.
+
+A cross-reference note recording this sits under **F22** in the threat model. So if
+a document or a conversation refers to F28/F29, it refers to conditions that are
+already covered — not to missing security work, and not to sections that exist.
 
 ## The signing contract, and where it lives
 

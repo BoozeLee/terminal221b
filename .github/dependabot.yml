@@ -8,3 +8,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Added 2026-10-03. The Rust half of the dependency surface — reqwest, ratatui,
+  # crossterm, serde — previously received no automated update at all, while the
+  # TypeScript half did. That is how this branch came to sit two commits behind
+  # public/main on dependency security without a bot flagging it.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly

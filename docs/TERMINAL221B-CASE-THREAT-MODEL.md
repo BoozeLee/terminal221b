@@ -221,6 +221,13 @@ The fix is one clause vocabulary. `packages/cli/resources/provider-boundary.json
 
 The guard is proven in both directions rather than asserted: `packages/cli/tests/boundary-drift.test.ts` and `packages/rust-tui/src/boundary_drift.rs` each mutate a copy of the real file with a prohibition removed and assert the renderer notices, and each carries a control that asserts the unmutated file still has it. A guard that has only ever run green has not been shown to fire. The residual is F23.
 
+**Numbering note (2026-10-03).** A September 2026 session specified two further findings by name — *F28, the two-language `dossierReport`/Rust-reader contract*, and *F29, that the screen must never re-derive the eligibility gate* — and they were never minted as standalone findings, so this model stops at F27. **Neither condition is unimplemented.** Both are addressed, and the numbers were simply never used:
+
+- The F28 condition is the second instance recorded under **F23**, found and closed 2026-10-02: the dossier's operator question was a Rust constant while the markdown export had no equivalent. It is now a required `operatorQuestion` field, the report version moved 1 to 2 so the field could be required, and `dossier.test.ts` fails if the Rust side grows a constant of its own.
+- The F29 condition is the contract stated at the top of `packages/rust-tui/src/dossier.rs`: *"a reader, never a judge."* It cites F22 as its precedent — the same remedy applied to the decision rather than to the prompt. The report arrives whole over `terminal221b case dossier PATH --json`, and the only thing the screen decides is layout.
+
+This note exists so the gap at F28/F29 is not later misread as missing security work. Nothing was dropped; the two conditions were absorbed into F22 and F23. Minting them as standalone findings would duplicate text that is already written, so they are cross-referenced here instead.
+
 ### F23 — The shared boundary is a convention held by two readers of one file, not a schema check. **Open by design. Low.**
 
 Nothing verifies at build time that the two clause vocabularies are identical; each side asserts against the shared file independently, so a clause added to only the TypeScript enum is caught by the next test run rather than at compile time, and only if someone remembers to run the other suite. Closing it means a generated vocabulary — one file the compiler reads on both sides — which requires a build step this repository does not have. The cost of not closing it is a drifted clause caught by a test rather than a compiler, which is the right trade for a repository with no codegen. The Expo app is the third surface; it shares the failure vocabulary by type-only import, but its renderer is a duplicate for the reason in F25.
