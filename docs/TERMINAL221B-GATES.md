@@ -598,6 +598,64 @@ target, which is a visible, reviewable change rather than a silent one. The red 
 that was planned — a deliberately failing `///` example — is therefore also not
 achievable, and the plan's premise that it was needed is wrong.
 
+### 11. Mutation testing — **measured, NOT gated**, and the measurement is incomplete
+
+**There is no mutation gate in this repository, and that is a decision rather than an
+omission.** The advisor ranked `measure_first_no_gate` at 0.99 with confidence 0.99: a
+nightly gate that is mostly red is doctrine rule 2, a training failure, and mutants on a
+TUI binary are exactly the case where most of them would survive.
+
+**What was actually measured, and what was not.**
+
+```sh
+cargo mutants --workspace --list | grep -cE '^packages/.*: (replace|delete|insert|change|swap)'
+# 429
+```
+
+429 mutants the crate generates, distributed:
+
+| File | Mutants |
+|---|---|
+| `main.rs` | 161 |
+| `session.rs` | 94 |
+| `dossier.rs` | 65 |
+| `prompt.rs` | 43 |
+| `boundary.rs` | 34 |
+| `workspace.rs` | 32 |
+
+`boundary_drift.rs` generates none.
+
+**The killed / timeout / survived split was NOT obtained, and no number is recorded here
+because none was measured.** The run fails on this host:
+
+```
+Caused by: Disk quota exceeded (os error 122)
+ERROR Worker thread failed: failed to overwrite
+  "/tmp/cargo-mutants-…/packages/rust-tui/src/main.rs"
+```
+
+`cargo-mutants` copies the working tree per worker, and this repository carries a 463M
+`node_modules` and a 1.8G `target`. `/tmp` is a **32G tmpfs already 79% full**, leaving
+about 6.6G. Eight workers need up to ~14G of copies; two workers still exhausted the
+quota. `--gitignore true` is set — `node_modules/` and `target/` are both ignored at
+`.gitignore:18` and `.gitignore:19` — and the run still fails, because the copy plus
+each worker's own build has to fit.
+
+A partial run did reach 35 mutants before the quota, of which **40 were flagged unviable
+cumulatively** (33 by the 35th). That is a real observation and it is the wrong one to
+generalise from — unviable is a pre-check, not a test outcome, and a 40-of-429-ish
+unviable rate says nothing about how many of the rest are killed.
+
+**So the question this measurement was supposed to answer is still open:** whether enough
+of these 429 mutants are killed to make a nightly gate honest. Answering it needs a host
+with more free space than this one has, or a scoped run (for example `cargo mutants -p
+terminal221b-tui --test workspace` for one file) that fits the quota. Until that number
+exists, no mutation gate is wired, and the cost of the instrumentation in CI is not
+being paid for a result nobody has seen.
+
+This section exists so the next session does not re-litigate the decision. The decision
+to measure first is settled; the measurement is not finished.
+
 ## Action pins
 
 Every action is pinned to a commit SHA with the tag in a trailing comment. A tag is a
