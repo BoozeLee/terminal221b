@@ -3,7 +3,7 @@ import { generateKeyPairSync, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseCaseBundle } from '../src/case.js';
+import { parseCaseBundle, type ConfirmationRecord } from '../src/case.js';
 import { FIXTURE_NOW, fixtureBundle as unsignedFixture } from '../src/case-fixtures.js';
 import {
   ATTESTED_KINDS,
@@ -151,11 +151,20 @@ describe('what a signature commits to', () => {
   });
 
   it('changes the payload digest when any attested field changes', () => {
-    const before = payloadDigestOf(recordsOfKind(signedFixture, 'confirmation')[0]);
-    const after = payloadDigestOf({
-      ...recordsOfKind(signedFixture, 'confirmation')[0],
+    // Typed field, not recordsOfKind(). recordsOfKind returns AttestedRecord, the
+    // deliberately minimal base (version + attestation?), because the per-kind id
+    // and payload fields are not on it. `statement` is a ConfirmationRecord field,
+    // so this spread reaches for the typed accessor instead. Same object, honest type.
+    const before = payloadDigestOf(signedFixture.confirmations[0]);
+    // Annotated so the literal's expected type is ConfirmationRecord rather than
+    // the weak base AttestedRecord, where `statement` reads as an excess property.
+    // ConfirmationRecord is assignable to AttestedRecord; a bare literal is not
+    // checked the same way.
+    const mutated: ConfirmationRecord = {
+      ...signedFixture.confirmations[0],
       statement: 'Confirmed something else entirely',
-    });
+    };
+    const after = payloadDigestOf(mutated);
     expect(after).not.toBe(before);
   });
 
@@ -255,11 +264,15 @@ describe('ed25519 record signatures', () => {
   });
 
   it('reads the record id from the field that kind actually uses', () => {
+    // recordIdOf() takes the base AttestedRecord and reaches the id through a
+    // double cast, because approvalId and searchId live on different types. The
+    // expectations below use the typed fields, so this asserts the double cast
+    // resolves to the same id the concrete record carries.
     expect(recordIdOf(recordsOfKind(signedFixture, 'approval')[0], 'approval')).toBe(
-      recordsOfKind(signedFixture, 'approval')[0].approvalId
+      signedFixture.approvals[0].approvalId
     );
     expect(recordIdOf(recordsOfKind(signedFixture, 'duplicateSearch')[0], 'duplicateSearch')).toBe(
-      recordsOfKind(signedFixture, 'duplicateSearch')[0].searchId
+      signedFixture.duplicateSearches[0].searchId
     );
   });
 });
@@ -460,7 +473,8 @@ describe('trusting a key', () => {
       FIXTURE_NOW
     );
     const checker = confirmationSignatureChecker(readManifest(root));
-    expect(checker(recordsOfKind(signedFixture, 'confirmation')[0])).toBe(true);
+    // The checker takes a ConfirmationRecord, which is not the base AttestedRecord.
+    expect(checker(signedFixture.confirmations[0])).toBe(true);
   });
 
   it('refuses a duplicate keyId, so trust cannot be silently widened', async () => {

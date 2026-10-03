@@ -238,7 +238,14 @@ const notDeclaredOnPurpose = new Set(['Report']);
 
 function wireStructs(source: string): Map<string, string[]> {
   const all = rustFieldNames(source);
-  return new Map(WIRE_STRUCTS.map((name) => [name, all.get(name) ?? []]).filter(([, keys]) => keys.length > 0));
+  // The return type is annotated because Map's constructor takes
+  // Iterable<readonly [string, string[]]>, and an unannotated arrow returning
+  // `[name, ...]` infers (string | string[])[], which is not that tuple.
+  return new Map(
+    WIRE_STRUCTS.map((name): [string, string[]] => [name, all.get(name) ?? []]).filter(
+      ([, keys]) => keys.length > 0
+    )
+  );
 }
 
 /**
