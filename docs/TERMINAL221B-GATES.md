@@ -292,33 +292,55 @@ exit 1
 **If you re-run this receipt, do not use a documented example key.** It will pass and
 tell you the gate works when it has told you nothing.
 
-**Known fragility: the licence check is an unauthenticated API call, so this gate can
-go red without scanning anything.** `gitleaks-action` v2 resolves whether a licence key
-is required by looking up the repository owner. Observed on run `37105740571`:
+**Two things about this gate that its green status does not tell you.** Both were
+found by reading the log rather than the job list, and the first one is a correction
+of an earlier claim in this file.
+
+**No licence key is needed here, and an earlier version of this section said
+otherwise. It was wrong.** The action's own output on a passing run says
+`[BoozeLee] is an individual user. No license key is required.`, and the upstream
+README states `GITLEAKS_LICENSE` is "required for organizations, not required for user
+accounts". The repository owner is a personal account:
+
+```sh
+gh api repos/BoozeLee/terminal221b --jq '.owner.type'   # User
+gh secret list --repo BoozeLee/terminal221b             # empty — and correctly so
+```
+
+**So the false red on run `37105740571` was not a missing licence.** It was a rate
+limit hitting the exemption lookup:
 
 ```
 ##[warning] Get user [BoozeLee] failed with error [HttpError: API rate limit exceeded
 for 172.182.195.177. …]. License key validation will be enforced.
-##[error] 🛑 missing gitleaks license. … store it as a GitHub Secret named
-GITLEAKS_LICENSE.
+##[error] 🛑 missing gitleaks license.
 ```
 
-That is a **false red**: no scan ran, and the failure has nothing to do with secrets.
-On run `37106340241` the same commit range passed genuinely —
+No scan ran, and the failure has nothing to do with secrets. Run `37106340241` passed
+genuinely — `3 commits scanned`, `no leaks found`. The job list cannot tell those two
+apart, so **check the log for `commits scanned` before believing a green here.** A
+gate that is randomly red for reasons unrelated to its purpose is as corrosive as one
+that is permanently red: both teach people to re-run instead of read.
 
-```
-[BoozeLee] is an individual user. No license key is required.
-INF 3 commits scanned.
-INF no leaks found
+**The pin is v2.3.9, and v2 is past its deprecation date.** Verified, not assumed:
+
+```sh
+gh api repos/gitleaks/gitleaks-action/git/ref/tags/v2.3.9 --jq '.object.sha'
+# ff98106e4c7b2bc287b24eaf42907196329070c7  <- exactly our pin
+gh api repos/gitleaks/gitleaks-action/git/ref/tags/v3.0.0 --jq '.object.sha'
+# e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
 ```
 
-Two things follow, and both are worth more than the flake. First, check the log for
-`commits scanned` before believing a green here; a green that scanned nothing and a
-green that scanned three commits look identical in the job list. Second, a gate that
-is randomly red for reasons unrelated to its purpose is as corrosive as one that is
-permanently red — both teach people to re-run instead of read. Not fixed here, because
-the fix is a repository secret rather than a code change, and secrets are not an
-agent's to create.
+Upstream: v2 runs on Node 20, which GitHub removed from hosted runners on
+**2026-09-16**, and "gitleaks-action@v2 will stop working regardless of any opt-out
+flag". v3 moves to Node 24 and requires a runner at v2.327.1 or newer. `actions/checkout`
+is already pinned at v7 here, which is past the v6 that v3 asks for, so the migration is
+the one-line action swap and nothing else.
+
+This is dated, and it is a supply-chain item, so it is carried into Phase 3 rather than
+fixed inside a docs commit. As of 2026-10-03 the v2 jobs are still running green, so
+enforcement is staged or lagging the announcement — which is a reason to move before it
+is not one.
 
 ### 5. `npm run typecheck:tests` — BLOCKING, and green
 
