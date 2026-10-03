@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import {
-  parseBountyScope,
   parseCaseBundle,
   parseCaseRecord,
   parseDuplicateSearchRecord,
@@ -10,6 +9,13 @@ import {
   validateCaseBundle,
   type CaseBundle,
 } from '../src/case.js';
+// parseBountyScope lives in scope.js, not case.js. It was imported from case.js
+// here, which does not re-export it, so it was `undefined` — and the one test
+// that used it asserted only that calling it throws. A `TypeError: not a
+// function` satisfies that, so the test passed while exercising nothing. See
+// packages/cli/src/scope.ts:26 for the real export and
+// packages/cli/tests/scope.test.ts:2 for the same import done correctly.
+import { parseBountyScope } from '../src/scope.js';
 import {
   FIXTURE_NOW,
   FIXTURE_POLICY_MAX_AGE_DAYS,
