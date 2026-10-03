@@ -42,7 +42,7 @@ five per-kind types cannot be expressed generically. The comment above
 the provenance path.
 
 So the tests were wrong, and **no production type was weakened** — `be2934f` touches
-nothing under `packages/cli/src/`. The gate went blocking in `2f6d0cf` and exits 0.
+nothing under `packages/cli/src/`. The gate went blocking in `ad482df` and exits 0.
 
 One of the six was not a fork at all but a bug, and a worse one. `ranking.test.ts`
 imported `parseBountyScope` from `../src/case.js`, which does not re-export it, so it
