@@ -292,6 +292,34 @@ exit 1
 **If you re-run this receipt, do not use a documented example key.** It will pass and
 tell you the gate works when it has told you nothing.
 
+**Known fragility: the licence check is an unauthenticated API call, so this gate can
+go red without scanning anything.** `gitleaks-action` v2 resolves whether a licence key
+is required by looking up the repository owner. Observed on run `37105740571`:
+
+```
+##[warning] Get user [BoozeLee] failed with error [HttpError: API rate limit exceeded
+for 172.182.195.177. …]. License key validation will be enforced.
+##[error] 🛑 missing gitleaks license. … store it as a GitHub Secret named
+GITLEAKS_LICENSE.
+```
+
+That is a **false red**: no scan ran, and the failure has nothing to do with secrets.
+On run `37106340241` the same commit range passed genuinely —
+
+```
+[BoozeLee] is an individual user. No license key is required.
+INF 3 commits scanned.
+INF no leaks found
+```
+
+Two things follow, and both are worth more than the flake. First, check the log for
+`commits scanned` before believing a green here; a green that scanned nothing and a
+green that scanned three commits look identical in the job list. Second, a gate that
+is randomly red for reasons unrelated to its purpose is as corrosive as one that is
+permanently red — both teach people to re-run instead of read. Not fixed here, because
+the fix is a repository secret rather than a code change, and secrets are not an
+agent's to create.
+
 ### 5. `npm run typecheck:tests` — BLOCKING, and green
 
 `packages/cli/tsconfig.test.json` (roadmap 0.3) type-checks the 18 CLI test files that
