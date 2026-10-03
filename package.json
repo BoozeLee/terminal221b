@@ -53,5 +53,10 @@
   "homepage": "https://github.com/BoozeLee/terminal221b",
   "bugs": {
     "url": "https://github.com/BoozeLee/terminal221b/issues"
+  },
+  "overrides": {
+    "postcss": "8.5.28",
+    "image-size": "2.0.3",
+    "uuid": "11.1.1"
   }
 }
