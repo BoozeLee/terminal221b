@@ -394,6 +394,47 @@ These move only through a reviewable bump commit, like any other dependency chan
 
 ---
 
+## 8. The seven CI steps that had no red proof
+
+Seven steps run in `.github/workflows/ci.yml` and were in no section of this register.
+They would fail if violated; nobody had seen one do it. Doctrine rule 3 asks for the
+demonstration, not the capability, so this section supplies it.
+
+All seven were red-proved against a real defect, then reverted. `git status` was
+empty and each step re-run green after its revert.
+
+| Step | Planted defect | Observed |
+|---|---|---|
+| `lint` | `const innerUnused = 1;` never read, in `App.tsx` | exit 1 — `'innerUnused' is assigned a value but never used. Allowed unused vars must match /^_/u` |
+| `typecheck` | `const __ts_probe: number = "not a number";` in `App.tsx` | exit 2 — `App.tsx(29,7): error TS2322: Type 'string' is not assignable to type 'number'.` |
+| `build:cli` | `const cliProbe: number = "wrong type";` in `packages/cli/src/cli.ts` | exit 2 — `src/cli.ts(796,7): error TS2322` |
+| `build` | `require('this-module-does-not-exist')` in `App.tsx` | exit 1 — `Unable to resolve module this-module-does-not-exist` |
+| `test` | `_it('deliberate red probe', () => { _expect(1).toBe(2); })` appended to `src/store/chatStore.test.ts` | exit 1 — `× deliberate red probe` |
+| `cargo test` | `#[test] fn deliberate_red_probe() { assert_eq!(1, 2); }` in `packages/rust-tui/src/session.rs` | exit 101 — `test session::deliberate_red_probe ... FAILED` |
+| `cargo build` | `pub fn build_probe() -> i32 { let s: String = 1; s }` in the same file | exit 101 — `error[E0308]: mismatched types` |
+
+### Two false negatives, recorded because they nearly became false conclusions
+
+**`lint` passed a type error and it was not the gate's fault.** The first probe named
+its variable `__lint_probe`, and `eslint.config.mjs` sets
+`varsIgnorePattern: '^_'`. The rule was configured to ignore exactly that name, so
+the defect was correct and the gate was right to stay quiet. The corrected probe used
+`innerUnused` and went red immediately. A gate that ignores `_`-prefixed names is
+working as configured; a reviewer who concludes otherwise from one probe is wrong.
+
+**`expo install --check` cannot be red-proved by editing `package.json`.** It reports
+"Dependencies are up to date" even with `expo` drifted from `~57.0.26` to `~56.0.23`,
+because it inspects the installed tree. See `docs/TERMINAL221B-DONE.md` §3a. It is
+not in CI and is not a gate.
+
+### Still not red-proved
+
+§6 `cargo deny check all` and §7 CodeQL have run green in CI but have never been seen
+to fail. CodeQL cannot be made to fail on demand from this machine at all. Both are
+recorded as outstanding in `docs/TERMINAL221B-DONE.md` §3.
+
+---
+
 ## Gates deliberately NOT installed yet
 
 Recorded so their absence reads as a decision rather than an oversight.

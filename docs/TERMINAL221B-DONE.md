@@ -17,7 +17,7 @@ The programme is finished when **all three** of these are true. Not two of three
 |---|---|---|---|
 | D1 | Every gate in the register is **green and blocking** | `gh run list --repo BoozeLee/terminal221b --branch feature/installable-terminal --limit 1` — no job may carry `continue-on-error` | **NOT MET** — see §2 |
 | D2 | No gate in the register is **red, or red-but-non-blocking** | `docs/TERMINAL221B-GATES.md` §5 is the only exception, and it is an open operator decision | **NOT MET** — see §2 |
-| D3 | Every gate in the register has a **recorded red proof** | each `### N` section of the register shows the defect and the exit code | **PARTIAL** — see §3 |
+| D3 | Every gate in the register has a **recorded red proof** | each `### N` section of the register shows the defect and the exit code | **MOSTLY MET** — 2 of 9 outstanding, see §3 |
 
 **D1 and D2 are one decision, not two.** The only reason D1 fails today is the single
 `continue-on-error: true` in `.github/workflows/ci.yml`. Until the `AttestedRecord`
@@ -58,21 +58,26 @@ component floor (§3c), and gitleaks (§4).
 proven red" and §7 CodeQL "Not executable locally". Both have since run green in CI,
 but running green is not the same as having been seen to fail.
 
-**And these CI steps are not in the register at all**, so they have neither a red
-proof nor a written standard:
+**And these CI steps were not in the register at all**, so they had neither a red
+proof nor a written standard: `lint`, `typecheck`, `build:cli`, `build`, `test`
+(`quality` job) and `cargo test`, `cargo build` (`rust` job).
 
-- `lint` (eslint), `typecheck`, `build:cli`, `build` (expo export), `test` — `quality` job
-- `cargo test`, `cargo build` — `rust` job
+**All seven are now red-proved and recorded in `docs/TERMINAL221B-GATES.md` §8**,
+each against a real defect and each reverted afterwards with `git status` confirmed
+empty. Two of the seven produced a *false* negative first and are recorded there
+because nearly became false conclusions — one because `eslint.config.mjs` sets
+`varsIgnorePattern: '^_'` and my probe variable was named `__lint_probe`, and one
+because `expo install --check` reads the installed tree (§3a).
 
-Every one of these will fail if violated. That has not been *demonstrated*, and
-demonstration is the standard here, not capability. Closing this gap is mechanical,
-it is the cheapest remaining work in the programme, and it needs no operator decision
-— which makes it the one thing that can be finished today.
+**What remains for D3:** §6 `cargo deny check all` and §7 CodeQL have run green in
+CI but have never been seen to fail, and CodeQL cannot be made to fail on demand
+from this machine at all. Those two are the remainder, and neither is closable by
+planting a defect.
 
 Re-derive the audit:
 
 ```sh
-grep -cE '^### [0-9]' docs/TERMINAL221B-GATES.md        # 9 sections
+grep -cE '^### [0-9]' docs/TERMINAL221B-GATES.md        # 9 gate sections
 grep -n 'Proven red\|Red proofs' docs/TERMINAL221B-GATES.md
 grep -c 'continue-on-error: true' .github/workflows/ci.yml   # 1
 ```
