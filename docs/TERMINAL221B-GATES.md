@@ -466,6 +466,23 @@ pinned to a measured float would go red for a reason that has nothing to do with
 code, which is the permanently-red-gate failure this file exists to prevent. It is still
 a ratchet: it passes today and any real drop fails, as the second red proof shows.
 
+**That margin was not caution, it was necessary — and the first CI run proved it:**
+
+| Host | Node | Lines |
+|---|---|---|
+| this box | 24.21.0 | 75.68% |
+| CI, run `37109282889` | 22 | **75.27%** |
+
+A 0.41-point spread between two machines, from one commit and one test suite. A floor
+set at 75.68 — which is what "the floor is the measured number" produces on its own —
+would have failed on CI's very first run, for a reason that has nothing to do with the
+code. Re-derive the CI figure from that job's log rather than trusting this table.
+
+The Rust figure shows no such spread: `cargo llvm-cov` reported **65.96%** on both this
+box and CI, because the Rust toolchain does not change with the Node version. If a
+future TypeScript run drifts more than 0.73 points, the floor needs raising
+deliberately, and this paragraph is where that should be noticed.
+
 **Scope is `packages/cli/src` and deliberately not `src/`.** The app is covered by two
 runners. vitest runs `src/services/api/ClaudeService.test.ts` and
 `src/store/chatStore.test.ts`; `src/screens/Chat/ChatScreen.tsx` is rendered only by jest
