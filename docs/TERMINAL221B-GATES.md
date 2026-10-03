@@ -167,6 +167,18 @@ a red check, which is worse than no gate. The gate is wired and visible; it does
 block until the fork is decided. **When it is decided, delete the `continue-on-error`
 line in the same commit that makes it green.**
 
+**Decision recorded 2026-10-03: leave it escalated.** The fork was routed to
+`jev_judge`, which returned `escalate-to-human` at 0.64 confidence with the
+distribution *escalate **0.72** · fix-tests 0.20 · fix-tests-plus-gate 0.07 ·
+fix-code **0.01***, and the operator confirmed the escalation stands. The reasoning
+is that the narrowing is deliberate hardening on the provenance path: widening
+`AttestedRecord` to satisfy a test scored 0.01 because it would undo a constraint
+that keeps consumers from depending on a shape the bundle author also controls.
+
+So this gate stays non-blocking **by decision, not by omission**. Its exit code is 2
+and that is the expected state. Reopening it means a human reversing this decision,
+not an agent noticing a red check.
+
 ### 6. `cargo deny check all`
 
 ```sh

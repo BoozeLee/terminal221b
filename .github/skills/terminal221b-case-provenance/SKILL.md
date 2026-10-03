@@ -82,12 +82,14 @@ where tests reach past that boundary: `store.test.ts(157,7)` `'statement'`,
 `dossier.test.ts(241,18)`. This was adjudicated and returned **`escalate to a human`**
 (0.72, against 0.20 for fixing the tests and 0.01 for widening the type).
 
-**So: do not fix these six errors, and do not widen `AttestedRecord`, without a human
-decision.** Widening the type to satisfy a test is the option that scored 0.01 — it
-undoes a narrowing that sits directly on the signature and digest path. The gate is
-wired in CI as `typecheck-tests` with `continue-on-error: true`; its exit code of 2
-is the documented state, not a regression. Remove the `continue-on-error` in the same
-commit that makes it green.
+**So: do not fix these six errors, and do not widen `AttestedRecord`.** Widening the
+type to satisfy a test is the option that scored 0.01 — it undoes a narrowing that
+sits directly on the signature and digest path. **This was decided on 2026-10-03:**
+the fork was routed to `jev_judge`, which returned `escalate-to-human` at 0.72
+against 0.20 for fixing the tests, and the escalation was confirmed and stands. The
+gate is wired in CI as `typecheck-tests` with `continue-on-error: true` **by that
+decision**; its exit code of 2 is the expected state, not a regression. Reopening it
+means a human reversing the decision, not an agent noticing a red check.
 
 ## Rules
 
