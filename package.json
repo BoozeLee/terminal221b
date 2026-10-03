@@ -16,6 +16,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",
     "typecheck:tests": "tsc -p packages/cli/tsconfig.test.json",
+    "test:count": "./scripts/assert-test-count.sh 385",
     "build": "expo export --platform web"
   },
   "workspaces": [

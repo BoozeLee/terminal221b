@@ -1,5 +1,13 @@
 name: CI
 
+# Every action is pinned to a commit SHA, with the human-readable tag in a
+# trailing comment. A tag is a mutable pointer: `actions/checkout@v4` is whatever
+# the owner published today, so a tag pin is a pin in name only. Renovate/Dependabot
+# are what move these forward, and a bump is then a reviewable diff like any other.
+#
+# Resolved with `gh api repos/<owner>/<repo>/commits/<ref>`, peeling annotated tags
+# to the commit they point at.
+
 on:
   push:
   pull_request:
@@ -7,25 +15,198 @@ on:
 permissions:
   contents: read
 
+# One gate per job, so a red check names the thing that broke instead of a single
+# `quality` that failed somewhere in its ninth step. The split is the roadmap's:
+# quality / typecheck-tests / rust / supply-chain / secrets / codeql.
+
 jobs:
   quality:
+    name: TypeScript quality + tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # bubblewrap is not on the ubuntu-24.04 image. Without it the six
+      # `it.skipIf(!HAS_BWRAP)` cases in executor.test.ts skip silently and the
+      # suite reports success at 379 instead of 385. Installing it is what makes
+      # the count assertion below meaningful rather than environment-dependent.
+      - name: Install bubblewrap
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          bwrap --version || { echo "::error::bubblewrap install did not take"; exit 1; }
+
+      - run: npm ci
+
+      - name: lint
+        run: |
+          set -euo pipefail
+          npm run lint || { echo "::error::npm run lint failed"; exit 1; }
+
+      - name: lint:shell
+        run: |
+          set -euo pipefail
+          npm run lint:shell || { echo "::error::shellcheck failed"; exit 1; }
+
+      - name: typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck || { echo "::error::npm run typecheck failed"; exit 1; }
+
+      - name: build:cli
+        run: |
+          set -euo pipefail
+          npm run build:cli || { echo "::error::npm run build:cli failed"; exit 1; }
+
+      - name: build (expo export)
+        run: |
+          set -euo pipefail
+          npm run build || { echo "::error::expo export failed"; exit 1; }
+
+      - name: test
+        run: |
+          set -euo pipefail
+          npm test || { echo "::error::vitest failed"; exit 1; }
+
+      # A suite that skips six cases and still exits 0 has not tested anything
+      # about those six. This is the floor that says so out loud. The threshold
+      # lives here and not in vitest.config.ts on purpose: a config file that
+      # judges the tests is edited by the same change it would judge.
+      - name: assert executed test count
+        run: |
+          set -euo pipefail
+          ./scripts/assert-test-count.sh 385 || { echo "::error::test count floor not met"; exit 1; }
+
+  typecheck-tests:
+    name: Typecheck the CLI test suite (NON-BLOCKING)
+    runs-on: ubuntu-24.04
+    # Deliberately non-blocking, and this comment is the reason.
+    #
+    # packages/cli/tsconfig.test.json (roadmap item 0.3) surfaces 6 real type
+    # errors that no gate has ever seen, because packages/cli/tsconfig.json has
+    # include ["src/**/*.ts"] and rootDir src — the 385 tests are transformed by
+    # vitest and never seen by tsc. The fork those 6 encode (was AttestedRecord's
+    # narrowing deliberate, on the signature/digest path?) was escalated to a human
+    # and is unresolved. A blocking gate that is red for a known, adjudicated
+    # reason trains everyone to ignore a red check. So the gate is wired and
+    # visible, and it does not block, until the fork is decided.
+    #
+    # When the fork is decided: fix the errors, then delete this
+    # continue-on-error line in the same commit that makes it green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run lint:shell
-      - run: npm test
-      - run: npm run typecheck
-      - run: npm run build:cli
-      - run: npm run build
-      - uses: dtolnay/rust-toolchain@stable
+      - name: typecheck:tests
+        run: |
+          set -euo pipefail
+          npm run typecheck:tests || { echo "::error::typecheck:tests failed (non-blocking, fork unresolved)"; exit 1; }
+
+  rust:
+    name: Rust fmt / clippy / test / build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # `clippy` is the gate this repository's own documentation prescribes three
+      # times over (docs/TERMINAL221B-AGENTIC-ENGINEERING.md,
+      # docs/TERMINAL221B-ENGINEERING-GUIDE.md,
+      # .github/skills/terminal221b-tui-engineering/SKILL.md) and which no workflow
+      # ran. `rustfmt` and `clippy` components both, because clippy here runs with
+      # `--all-targets` and needs the test targets to lint too.
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
-      - run: cargo test --workspace --locked
-      - run: cargo build --workspace --locked
+          components: rustfmt, clippy
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: cargo fmt
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check || { echo "::error::rustfmt would reformat the tree"; exit 1; }
+
+      - name: cargo clippy
+        run: |
+          set -euo pipefail
+          cargo clippy --workspace --all-targets --locked -- -D warnings \
+            || { echo "::error::clippy denied a warning; -D warnings is the gate"; exit 1; }
+
+      - name: cargo test
+        run: |
+          set -euo pipefail
+          cargo test --workspace --locked || { echo "::error::cargo test failed"; exit 1; }
+
+      - name: cargo build
+        run: |
+          set -euo pipefail
+          cargo build --workspace --locked || { echo "::error::cargo build failed"; exit 1; }
+
+  supply-chain:
+    name: cargo-deny (advisories / bans / licenses / sources)
+    runs-on: ubuntu-24.04
+    # licenses is not hygiene here, it is redistribution. The crate is
+    # AGPL-3.0-only and published publicly; a dependency under a conflicting
+    # licence is a defect in what we ship, not a style note.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: install cargo-deny
+        run: |
+          set -euo pipefail
+          cargo install cargo-deny --locked \
+            || { echo "::error::cargo-deny install failed"; exit 1; }
+      - name: cargo deny check
+        run: |
+          set -euo pipefail
+          cargo deny check all || { echo "::error::cargo deny reported a finding"; exit 1; }
+
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    # Scans the working tree, not the history: `detect --no-git` is the mode that
+    # catches a key someone pasted into a file, which is the failure that actually
+    # happens. History scanning is a separate decision and is not enabled here.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_NOTIFY_USER_LIST: ""
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, rust]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          languages: ${{ matrix.language }}
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          category: "/language:${{ matrix.language }}"
