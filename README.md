@@ -199,7 +199,27 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 /tmp/terminal221b-prefix/bin/terminal221b --help
 ```
 
-For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is currently unpublished (`private: true` in its manifest) — a distribution choice, not a licence one; the licence below permits redistribution under its own terms.
+For normal use, install from a GitHub Release, which verifies the sha256 before extracting:
+
+```sh
+curl -fsSL https://github.com/BoozeLee/terminal221b/releases/latest/download/install.sh | bash
+```
+
+or with npm, once the package is published to the registry:
+
+```sh
+npm install -g terminal221b-cli
+```
+
+The CLI is **not yet on npm** — the package is `private: false` and ready, but the first publish
+has not been made. The GitHub Release path above is the current channel. Neither is a licence
+question: AGPL-3.0-only permits redistribution under its own terms.
+
+The Rust TUI is on crates.io:
+
+```sh
+cargo install terminal221b-tui --version 0.1.0
+```
 
 The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute model-directed tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers. Crypto ideas and project analysis can be discussed with the existing chat prompt, but the CLI does not trade NFTs/tokens, manage wallets, or submit bounty reports.
 

@@ -74,7 +74,7 @@ const trusted = manifestWith([KEY_ID, spkiBase64()]);
  * the suite. A leak of this size is invisible per run and cumulative across
  * them, which is how a TypeScript fixture leak filled the tmpfs and failed eight
  * unrelated Rust tests with `Disk quota exceeded`. See
- * docs/TERMINAL221B-GATES.md section 16.
+ * docs/TERMINAL221B-GATES.md section 20.
  */
 const scratchRoots: string[] = [];
 

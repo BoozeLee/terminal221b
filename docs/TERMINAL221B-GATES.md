@@ -21,6 +21,8 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 | `npm run lint` | `quality` | yes |
 | `npm run lint:shell` | `quality` | yes |
 | provider boundary copies identical (§14) | `quality` | yes |
+| release artifact contents (§17) | `release` | yes |
+| tag matches both manifests (§18) | `release` | yes |
 | `npm run typecheck` | `quality` | yes |
 | `npm run build:cli` | `quality` | yes |
 | tarball manifest + `publint` (§12) | `quality` | yes |
@@ -1075,9 +1077,154 @@ Verified after the rename, all on the same tree: `npm ci` exit 0 · `npm run bui
 access` · tarball gate 25 files · `publint` All good · `npm test` 391 · components 4 ·
 `cargo test` 61 · zero temp-dir leaks.
 
-## 16. Environmental, not a gate: `rm` does not remove anything on this host
+## 17. The release artifact — `scripts/assert-release-artifact.sh`
 
-renumbered from 15 to 16 when section 15 (the published name) was added above it.
+```sh
+./scripts/assert-release-artifact.sh dist/release/terminal221b-cli-0.1.0.tar.gz
+```
+
+**Why a second gate when §12 already checks a tarball.** §12 checks what `npm pack` is about to
+produce *on one machine*. This checks the file that will actually be **uploaded**: a different
+artifact, from a different command, in a different environment (CI), possibly re-uploaded by a
+human. A gate that only ever inspects the pre-upload state is not a gate on the release.
+
+It re-derives every rule from the **extracted** tarball. The manifest rules are deliberately
+duplicated from §12 rather than shared: this gate runs on a different artifact, and a shared
+helper would mean the release silently inherits a bug in the pack gate's copy instead of stating
+its own rules.
+
+The three assertions that matter most:
+
+- **The `bin` target exists, is non-empty, and starts with `#!`.** An artifact whose bin is missing
+  installs cleanly and then fails on first run — the exact failure `prepare` was added to prevent,
+  and the one a user actually experiences.
+- **`resources/provider-boundary.json` is present and byte-identical to the canonical file.** This
+  is the release-level statement of the invariant §14 enforces in-repo. A stale copy ships a policy
+  weaker than the project believes it is shipping.
+- **A `.sha256` beside the artifact, verified.** The installer refuses to extract a download it
+  cannot verify, so a mismatch here means a broken install path.
+
+**Red proofs — six, each required to fail for the RIGHT reason.** A red proof that fires on some
+earlier condition proves the script has a guard, not that the guard is the one claimed, so the
+harness matches the message as well as the exit code:
+
+| Probe | Message |
+|---|---|
+| `LICENSE` deleted | `LICENSE is missing from the release artifact.` |
+| `src/leaked.ts` added | `the release artifact contains files that must not ship` |
+| boundary tampered | `the provider boundary in the artifact differs from the canonical one` |
+| `bin` → nonexistent | `the bin points at dist/does-not-exist.js, which is not in the artifact` |
+| `prod.pem` added | `credential-shaped filenames` |
+| version set to 9.9.9 | `the artifact is version 9.9.9 but the manifest says 0.1.0` |
+| **control** | the real artifact is still accepted |
+
+**Two bugs this gate's own proofs found**, neither visible by reading it:
+
+1. **The `.sha256` check silently passed as "no checksum file"** against an artifact that *had* one,
+   because the script `cd`s into the extract directory and the relative path stopped resolving. A
+   gate that reports "no checksum" when there is one trains you not to read it. The path is now
+   resolved to absolute before any `cd`.
+2. **It leaked its temp directory on every run** — 3 runs, 3 leftovers. A trash helper refuses to
+   delete a directory that is an *ancestor of the current working directory*, and this script ends
+   up inside its own temp dir. Different constraint from the non-expanding `rm` shim (§16), same
+   class of silent cleanup failure. The trap now leaves the directory first; re-verified at **5
+   runs, 0 leftovers**, with all six red proofs still firing.
+
+## 18. A release comes from a tag that matches both manifests
+
+```sh
+./scripts/verify-release-version.sh v0.1.0
+```
+
+A tag saying `v0.2.0` over a manifest saying `0.1.0` produces a release whose notes describe
+something that was never built. Nothing downstream can catch it: the artifact genuinely *is*
+0.1.0, every gate is genuinely green, and the only false statement is the one in the most-read
+document the project produces.
+
+**Both** manifests are checked, because the CLI and the crate version independently, and a release
+that ships one bumped and one not is a release shipping two different versions under one name.
+
+Red proof: `v0.2.0` → `tag v0.2.0 does not match the CLI version 0.1.0`, exit 1.
+
+### The release workflow cannot ship from a red tree
+
+`.github/workflows/release.yml` is **tag-triggered only** — a release comes from a named immutable
+version, never from whatever is on a branch. `concurrency` is per-tag with
+`cancel-in-progress: false`, so a second push of the same tag is a mistake to surface rather than a
+race to win. `permissions` is `contents: write` and nothing else.
+
+The order is the design: tag check → **the entire §1–§14 gate set** → build → assert → upload. A red
+gate anywhere above the upload means no release. A pipeline that can produce a release from a red
+tree ships broken software with a green tick beside it, which is worse than no pipeline.
+
+**Notes are generated, not written.** The `v1.0.0` body claimed *445 tests*; the tree had 452.
+Nothing could catch that, because the number was typed by a person and a person is not a gate.
+`scripts/release-notes.sh` prints what the run measured, and a count it cannot measure prints
+**"not measured"** rather than a remembered figure. It takes counts from `T221B_COUNT_LOG` when CI
+supplies them, so the notes describe the run that produced the artifact.
+
+> Found while building this: the generator printed "not measured" for both JS suites while Rust
+> measured fine. The JSON was correct — `require()` on an `mktemp` file with no `.json` suffix
+> throws on the first colon, and `stderr` was discarded, so a code error presented as a
+> measurement failure. Fixed by reading and parsing, which is the trap
+> `assert-test-count.sh` already documents.
+
+`gh release` rather than a third-party release action: it ships with the runner, needs no pin of
+its own, and is one less tag that could move under us. Every `uses:` in all three workflows is a
+40-character SHA.
+
+## 19. The installer verifies before it extracts
+
+```sh
+curl -fsSL https://github.com/BoozeLee/terminal221b/releases/latest/download/install.sh | bash
+```
+
+Not a CI gate — it is the one script a stranger runs — but it is red-proved like one, because
+`curl | bash` is the least forgiving thing this project ships.
+
+It **refuses to run as root**, prints every path before writing to it, checks Node ≥ 22 against
+`engines`, and verifies the sha256 **before extracting**. A release with no `.sha256` aborts too:
+without a checksum there is nothing to verify against, and proceeding would be the bug.
+
+**No per-OS branch, because there is no per-OS artifact.** Measured — the tarball is 19 `.js`,
+2 `.json`, 3 text, 1 `.sh`, and **zero** compiled or native files:
+
+```
+$ find package -type f \( -name '*.node' -o -name '*.so' -o -name '*.dylib' \
+      -o -name '*.exe' -o -name '*.wasm' \)
+(nothing)
+```
+
+It is pure text because the CLI has **zero runtime dependencies**, so one file serves every
+platform with Node 22 or later. An installer that resolved `uname -m` would be inventing a
+distinction the release does not have.
+
+**11 checks against a local server in a temporary `HOME`** — no GitHub, no account, nothing
+installed for real:
+
+| | |
+|---|---|
+| green path | installs, symlinks, boundary present, binary runs |
+| corrupt sha | `CHECKSUM MISMATCH`, **nothing extracted** |
+| no `.sha256` | aborts, nothing extracted |
+| asset missing | aborts naming the release |
+| truncated tarball | rejected after the checksum passes |
+
+Two findings from building it, neither of them the installer's fault:
+
+- **`install.sh` was not covered by `npm run lint:shell`.** The glob was
+  `packages/cli/resources/*.sh scripts/*.sh`; a root-level script is in neither. Adding it
+  immediately produced SC2015 on an `A && B || C` that genuinely *was* ambiguous. The gate was not
+  catching what it appeared to catch.
+- **Two proofs failed for an unrelated reason**: the `mise` `node` shim, under a fake `HOME`,
+  decided its install tree was empty and tried to re-download node onto a full tmpfs. A harness
+  failure wearing the installer's clothes. The harness now pins node 22 by absolute path — the
+  same major CI uses.
+
+## 20. Environmental, not a gate: `rm` does not remove anything on this host
+
+renumbered twice: 15 → 16 when section 15 (the published name) was added, then
+16 → 20 when §§17–19 (the release gates and the installer) were added.
 
 Not a gate, and deliberately not made into one. Recorded because it cost real time
 and it presents as a code regression.

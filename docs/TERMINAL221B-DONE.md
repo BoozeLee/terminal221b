@@ -178,6 +178,15 @@ Two gates added, both answering a question no earlier gate could.
 | §12 `scripts/assert-tarball-contents.sh` + `publint` | does the **published tarball** contain what it should, and nothing it should not? | 4 red proofs recorded |
 | §13 `scripts/assert-crate-publishable.sh` | would `cargo publish` **succeed**, without publishing? | went red on its first honest run, on a real bug; **green since the fix** |
 | §14 `scripts/assert-boundary-copies-identical.sh` | are the CLI and the TUI enforcing the **same** boundary policy? | 2 red proofs recorded |
+| §17 `scripts/assert-release-artifact.sh` | is the artifact that will be **uploaded** the right one? | 6 red proofs recorded, plus a green control |
+| §18 `scripts/verify-release-version.sh` | does the tag agree with **both** manifests? | 1 red proof recorded |
+| §19 `install.sh` | does a stranger's install verify before it extracts? | 11 checks against a local server, in a temp `HOME` |
+
+**The release path is complete and unexercised end to end.** Every piece is built and
+red-proved locally, and `release.yml` is wired, but **no GitHub Release has been published** —
+that needs a maintainer pushing a tag, and it is theirs to do. The existing `v1.0.0` release
+still has **zero assets** and a body claiming 445 tests when the tree has 456; correcting it is
+also a maintainer action, since editing a published release is an account operation.
 
 Re-derive:
 

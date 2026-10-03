@@ -7,11 +7,27 @@ only when you ask it to, and says so when it does.
 
 ## Install
 
+From a GitHub Release — verifies the sha256 before extracting:
+
+```sh
+curl -fsSL https://github.com/BoozeLee/terminal221b/releases/latest/download/install.sh | bash
+```
+
+Or with npm:
+
 ```sh
 npm install -g terminal221b-cli
 ```
 
-Requires **Node.js 22 or newer**.
+Requires **Node.js 22 or newer**. There is no per-platform download: the release is one
+text tarball, because the CLI has no runtime dependencies and ships no compiled artifacts.
+
+The installer refuses to run as root, prints every path before writing to it, and aborts rather
+than extracting a download whose checksum does not match. If you would rather read it first:
+
+```sh
+curl -fsSL https://github.com/BoozeLee/terminal221b/releases/latest/download/install.sh
+```
 
 ## Use
 
