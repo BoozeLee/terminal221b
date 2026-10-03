@@ -22,6 +22,7 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 | `npm run lint:shell` | `quality` | yes |
 | `npm run typecheck` | `quality` | yes |
 | `npm run build:cli` | `quality` | yes |
+| tarball manifest + `publint` (§12) | `quality` | yes |
 | `npm run build` | `quality` | yes |
 | `npm test` | `quality` | yes |
 | executed test count ≥ 390 (384 without a sandbox) | `quality` | yes |
@@ -32,6 +33,7 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 | `cargo clippy … -D warnings` | `rust` | yes |
 | `cargo test --workspace --locked` | `rust` | yes |
 | `cargo build --workspace --locked` | `rust` | yes |
+| `cargo publish --dry-run` (§13) | `rust` | yes |
 | `cargo deny check all` | `supply-chain` | yes |
 | gitleaks | `secrets` | yes |
 | CodeQL (JS-TS, Rust) | `codeql` | yes |
@@ -673,6 +675,189 @@ being paid for a result nobody has seen.
 This section exists so the next session does not re-litigate the decision. The decision
 to measure first is settled; the measurement is not finished.
 
+### 12. The tarball manifest — `scripts/assert-tarball-contents.sh` + `publint`
+
+```sh
+./scripts/assert-tarball-contents.sh
+npx --yes publint@0.3.25 packages/cli
+```
+
+**Why this gate exists at all.** Until this phase, `packages/cli` was `"private": true` and had
+never been packed, so nothing needed checking. Publishing it makes "it packs" a claim, and
+`npm pack` exiting 0 is a claim about npm, not about this package. It is satisfied by a tarball
+whose `bin` points at a `dist/` that does not exist, with no licence, carrying a test fixture.
+
+**The single highest-value change in the phase is not this gate** — it is the `prepare` script in
+`packages/cli/package.json`. Measured, not assumed:
+
+```sh
+# a copy of the package with `prepare` removed and no dist/
+npm pack --dry-run        # ->  total files: 4,  no dist/cli.js
+```
+
+Four files, no `dist/`, and a `bin` that would install successfully and then do nothing. npm runs
+`prepare` **before** packing, so `prepare: "npm run build"` makes a clean checkout packable. With
+it, the same clean-checkout pack produces **23** files including `dist/cli.js`; with `LICENSE` and
+`README.md` added (§ below) the gate measures **25**.
+
+**The gate asserts an exact set, not a subset.** A check that only asserts "the files I remember
+are present" passes when a new file is added, and the way a package ships a secret is by a file
+nobody listed. The expected set is *derived*, not hard-coded: `dist/*.js` from `src/*.ts` by name,
+plus every file in `resources/`, plus four required files. Deleting a source file needs no edit to
+the script, and the assertion still catches a `dist/` stale relative to `src/`.
+
+It additionally forbids `src/`, `tests/`, `tsconfig*`, `node_modules/`, `coverage/`, `target/` and
+`*.tgz`; denies credential-shaped *filenames* (`.env*`, `*.pem`, `*.key`, `id_rsa*`,
+`credentials*`, `*.keystore`); requires `dist/cli.js` to be non-empty and to start with a shebang;
+and pins the set of `.sh` files to the single one `npm run lint:shell` covers.
+
+Credential matching is on **names, not contents**, and that is deliberate: `resources/
+provider-boundary.json` contains the words "secret", "API keys" and "credentials" in its policy
+prose. A content scan would flag the very rules that forbid handling a secret.
+
+**Red proofs.** Four, each observed:
+
+| Probe | Result |
+|---|---|
+| `packages/cli/LICENSE` removed | `::error::LICENSE is missing from the tarball.` |
+| `packages/cli/resources/probe.sh` added | `::error::unreviewed shell scripts in the tarball: resources/probe.sh` |
+| `packages/cli/resources/prod.pem` added | `::error::the tarball contains credential-shaped filenames: resources/prod.pem` |
+| `bin` pointed at `./dist/does-not-exist.js` | `publint` → `pkg.bin.terminal221b is ./dist/does-not-exist.js but the file does not exist.` |
+
+`publint` also found one real defect on first run, now fixed: `pkg.repository.url` was a plain
+`https://` URL where a `git+https://` form is expected.
+
+#### A red proof that did not work, and what it taught
+
+The first red proof attempted here was adding `packages/cli/tests/probe.json` — a test fixture
+carrying a fake key, the realistic leak. **It passed green.** Not because the gate is correct, but
+because `files: ["dist", "resources"]` already excludes `tests/`, so the file could never reach the
+tarball.
+
+That is worth recording rather than quietly replacing with a probe that works. The `files`
+allowlist is a real filter, and every forbidden-pattern check in this gate is shielded by it. A
+shielded check is not a verified one. The probes that follow were re-run through
+`resources/`, which *is* inside the allowlist and therefore genuinely reaches the tarball — and
+those are the ones that went red.
+
+#### This gate was wrong 1 run in 20, and the bug was a race
+
+An early version of this script asserted file presence with:
+
+```sh
+printf '%s\n' "${ACTUAL[@]}" | grep -qxF "$f" || fail "..."
+```
+
+Under `set -o pipefail` that is a race. `grep -q` exits the moment it matches, `printf` takes
+SIGPIPE, and `pipefail` reports the pipeline's failure — so a file that **is** present reads as
+missing. It reported a missing `README.md` on 1 run in 20 while `README.md` was present in every
+tarball, and it was misattributed twice before the cause was found: first to `npm pack`
+(measured 0/30 failures across 30 raw packs — npm is deterministic), then to a stale temp
+directory. **The flake was in the gate, not in npm.**
+
+The fix is to grep the manifest *file* rather than pipe an array through `printf`, so there is no
+pipe to lose the race, and to use one `LC_ALL=C sort` for both `comm` inputs. Re-verified over **60
+consecutive runs: 0 red.**
+
+The general lesson, and the reason it is written down: a gate that reports a *wrong* reason is
+worse than no gate, because it sends you to fix the thing it names. The misattribution cost more
+time than the defect it was hiding.
+
+#### `attw` is deliberately NOT in this gate
+
+`@arethetypeswrong/cli` 0.18.5 was run against the real tarball:
+
+```
+$ npx --yes @arethetypeswrong/cli@0.18.5 terminal221b-cli-0.1.0.tgz
+This package does not contain types.
+{ "packageName": "@terminal221b/cli", "packageVersion": "0.1.0", "types": false }
+exit 0
+```
+
+It resolves a package's `exports` map and TypeScript declaration surface. This package is a
+bin-only, `type: module` CLI with no `exports`, no `main` and no `types` — there is nothing for it
+to resolve. **It cannot go red on this package**, and a gate that cannot fail is worse than no
+gate, so it is not wired. The plan predicted this and specified removal rather than leaving it in
+to make the step look thorough. It is recorded here so the next session does not re-add it.
+
+`attw` is the second tool in this repository that is inapplicable rather than merely absent; see
+§13 for the first.
+
+### 13. `cargo publish --dry-run` — `scripts/assert-crate-publishable.sh`
+
+```sh
+./scripts/assert-crate-publishable.sh
+```
+
+**The question no other gate answers.** `cargo build --workspace --locked` builds the crate against
+the working tree and the workspace around it. `cargo publish --dry-run` packages the crate and
+builds the **packed** result, which is the thing that has to compile on crates.io. A crate that
+builds here because it can see its neighbours, and fails there because the tarball is missing
+something, is invisible to every gate already in this register.
+
+It runs in two passes on purpose. Pass 1 is `--no-verify`: fast, and its errors are about the
+manifest. Pass 2 builds the packed crate. Separated so a typo in a `readme` path and a compile
+error do not print the same message — the difference between a red build you can act on and one
+you re-run by hand to understand. `--locked` throughout, so the gate cannot pass against a
+lockfile that differs from the committed one.
+
+**A property of this gate worth knowing before running it locally:** `cargo publish` refuses to
+package a **dirty** working tree.
+
+```
+error: 2 files in the working directory contain changes that were not yet committed into git:
+packages/rust-tui/Cargo.toml
+packages/rust-tui/README.md
+to proceed despite this and include the uncommitted changes, pass the `--allow-dirty` flag
+```
+
+So this gate is meaningful on a clean tree — in CI, always, and locally, only after committing.
+`--allow-dirty` is deliberately **not** used: it would let a local run pass against state that CI
+would reject, which is precisely the kind of green that does not mean anything.
+
+**Red proofs.** Two observed, both from the manifest half:
+
+| Probe | Result |
+|---|---|
+| `readme = "README-does-not-exist.md"` | `::error::Cargo.toml names readme = "README-does-not-exist.md", which does not exist.` |
+| `description` line deleted | `::error::Cargo.toml is missing the required field: description` |
+
+Both are the checks crates.io only *warns* about. That is the point of asserting them here: a
+warning nobody reads is not a gate, and `readme` pointing at a missing file would otherwise ship
+as a published crate carrying no description of itself.
+
+#### The verification half went red on a real bug, and that is the whole point
+
+The third red proof was attempted for real: exclude `src/main.rs` from `include/` and prove the
+verification build catches a crate that cannot build once packed. It never got that far, because
+the gate was **already red** before any probe was planted.
+
+```sh
+$ cargo publish -p terminal221b-tui --dry-run --locked
+   Verifying terminal221b-tui v0.1.0
+   Compiling terminal221b-tui v0.1.0 (…/target/package/terminal221b-tui-0.1.0)
+error: couldn't read `src/../../cli/resources/provider-boundary.json`: No such file or directory
+   --> src/boundary.rs:154:5
+    |
+154 |     include_str!("../../cli/resources/provider-boundary.json")
+```
+
+**`terminal221b-tui` has never been publishable.** `boundary.rs:154` embeds the provider boundary
+with `include_str!("../../cli/resources/provider-boundary.json")` — a path that leaves the crate
+directory. It resolves in this repository, where `packages/cli/` sits next to `packages/rust-tui/`,
+and it does not exist inside a packed crate, where only the crate's own files travel. Every
+existing Rust gate passes, because every existing Rust gate builds the **working tree**; this is
+the first thing in the repository to build the **packaged** crate.
+
+Confirmed pre-existing, not introduced by the `include/` added for crates.io: the same failure
+reproduces against `22e9f75`, before this phase touched `Cargo.toml`.
+
+This is a gate doing exactly its job on its first honest run. The alternative — a repository that
+believes its crate is publishable until someone tries to publish it — is the state this gate was
+written to end. The fix is not mechanical and is **not** taken here; it changes where the single
+source of truth for the boundary policy lives, and that file is a security policy. See
+`docs/TERMINAL221B-DONE.md` §7.
+
 ## Action pins
 
 Every action is pinned to a commit SHA with the tag in a trailing comment. A tag is a
@@ -742,8 +927,12 @@ recorded as outstanding in `docs/TERMINAL221B-DONE.md` §3.
 
 Recorded so their absence reads as a decision rather than an oversight.
 
-- **`cargo-semver-checks`** — release CI only, per roadmap Phase 1 item 5. There is no
-  release pipeline to attach it to yet.
+- **`cargo-semver-checks`** — **inapplicable, not deferred.** `terminal221b-tui` is a bin-only
+  crate: it has a `[[bin]]` and **no `[lib]` target**, so it exposes no public Rust API and
+  therefore has no semver surface to check. There is no release pipeline to attach it to either,
+  but that is the smaller reason — attaching it to a crate with no API would produce a green
+  forever and the appearance of a checked contract. Corrected 2026-10-03; this line previously
+  said "release CI only", which implied it would apply once a pipeline existed.
 - **`cargo-llvm-cov` `--fail-under-lines 70`** — Phase 3, and only on main.
 - **`cargo-nextest` with `--flaky-result fail`** — Phase 3. It exists to make a
   pass-on-retry report as flaky instead of silently green; that is worth having only
@@ -775,6 +964,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --locked
+./scripts/assert-crate-publishable.sh    # needs a clean tree; see section 13
+
+./scripts/assert-tarball-contents.sh
+npx --yes publint@0.3.25 packages/cli
 
 gitleaks detect --no-git --source . --redact
 # cargo deny check all        # requires: cargo install cargo-deny --locked

@@ -120,10 +120,17 @@ being re-raised each pass.
 
 | Decision | Blocks | Trigger to revisit |
 |---|---|---|
-| Does the CLI ship? It is `"private": true` today | all of Phase 4 | the moment packaging is wanted |
+| **Who owns the `@terminal221b` npm scope**, and is that name still free? | the npm publish | decided *that* it publishes; the scope must be created before the first publish can be attempted, and npm gives no public read on whether a name is taken — the 403 from `npmjs.com/org/terminal221b` is returned for orgs that do not exist too |
+| crates.io account + 2FA, and the API token for `cargo login` | the crates.io publish | same: the name `terminal221b-tui` was free when checked, and nothing has been published |
 | Does the mobile app ship to stores, or stay internal? | most of Phase 6 | the first store submission |
 | `allowUnsandboxed` when bwrap is present but **broken** | `packages/cli/src/executor.ts` | if a caller ever needs the opt-in |
 | The `AttestedRecord` narrowing (§2) | D1, D2 | next planning round |
+
+**Resolved 2026-10-03: "Does the CLI ship?" is answered yes** — the operator chose to publish to
+npm and to crates.io, accepting that a first publish claims each name permanently. The two gates
+that make both publishes *possible* are in place (§7). The publishes themselves have not been
+performed: they need an account, 2FA and a token, and each one is a one-way door that should be
+authorised on its own rather than inherited from a plan.
 
 **No agent may assume an answer to any of these and proceed.** Assuming one produces
 work that has to be thrown away, which is how the programme got into a loop.
@@ -134,10 +141,10 @@ work that has to be thrown away, which is how the programme got into a loop.
 
 | Phase | Status | Why not now |
 |---|---|---|
-| 3 — coverage and mutation | not started | new capability, not completion. If started, **coverage first** — a mutation score on unknown coverage measures the wrong thing |
-| 4 — CLI distribution | parked | §4 |
-| 5 — agent harness | not started | agents inherit whatever enforcement exists; D1–D3 are not met |
-| 6 — E2E and release | parked | §4 |
+| 3 — coverage and mutation | **done** | coverage gated (TS 75, Rust 65); mutation measured-not-gated, and the killed/timeout/survived split is still unmeasured on this host |
+| 4 — CLI distribution | **gates in place; the two publishes are not done** | §7 |
+| 5 — agent harness | not started | agents inherit whatever enforcement exists |
+| 6 — E2E and release | partly parked | the mobile-store decision (§4) |
 
 Adding capability before meeting D1–D3 is how the finish line kept moving. The work
 that closes this programme is the work that removes gates, not the work that adds
@@ -159,3 +166,77 @@ cargo test --workspace --locked         # 60 passed
 The gates are real, the counts hold, and the red proofs for the load-bearing gates
 are recorded. What is missing is narrow and specific: one operator decision (§2), and
 the red proofs listed in §3. Neither is large. Both are finishable.
+
+---
+
+## 7. Phase 4 — the two distribution gates
+
+Two gates added, both answering a question no earlier gate could.
+
+| Gate | Question it answers | Red-proof status |
+|---|---|---|
+| §12 `scripts/assert-tarball-contents.sh` + `publint` | does the **published tarball** contain what it should, and nothing it should not? | 4 red proofs recorded |
+| §13 `scripts/assert-crate-publishable.sh` | would `cargo publish` **succeed**, without publishing? | went red on its first honest run, on a real bug |
+
+Re-derive:
+
+```sh
+./scripts/assert-tarball-contents.sh       # 25 files, all accounted for
+npx --yes publint@0.3.25 packages/cli      # All good!
+./scripts/assert-crate-publishable.sh      # RED — see below
+```
+
+### 7a. `terminal221b-tui` has never been publishable, and §13 found it
+
+The crate gate is **red**, and it is red for a real reason rather than a planted one:
+
+```
+error: couldn't read `src/../../cli/resources/provider-boundary.json`: No such file or directory
+   --> src/boundary.rs:154:5
+    |
+154 |     include_str!("../../cli/resources/provider-boundary.json")
+```
+
+`boundary.rs:154` embeds the provider boundary through a path that **leaves the crate directory**.
+It resolves in this repository, where `packages/cli/` sits beside `packages/rust-tui/`, and it
+cannot resolve inside a packed crate, where only the crate's own files travel. So the crate would
+fail on the first publish attempt to crates.io — after the name was claimed, and irrecoverably.
+
+Confirmed pre-existing: it reproduces against `22e9f75`, before this phase touched `Cargo.toml`.
+Every prior Rust gate passed because every prior Rust gate builds the working tree; this is the
+first gate in the repository to build the **packaged** artefact.
+
+**This is not fixed here, deliberately.** The obvious fixes — copy the boundary file into the
+crate, or add a `build.rs` that copies it — both create a second copy of a **security policy**
+file, and both can drift from the TypeScript side silently. That is precisely the failure
+`boundary_drift.rs` and `boundary-drift.test.ts` were written to prevent, and reintroducing it to
+satisfy a packaging gate would trade a loud failure for a quiet one. The durable fix is to decide
+where the single source of truth lives and make the other side read it, which is a design decision
+about a policy file, not a mechanical edit.
+
+**So the crate gate is left red on purpose.** It is wired, blocking, and honest. Per this
+repository's own doctrine, a permanently-red gate is a training failure — but a gate that is
+disabled, or deleted because its finding is inconvenient, is the failure this whole programme was
+assembled to prevent. The red is the finding.
+
+**Neither package has been published.** `npm whoami` is unauthenticated and there is no
+`~/.cargo/credentials.toml`. Both first publishes are permanent — npm's version can be
+deprecated but never withdrawn, and cargo's "can never be overwritten, and the code cannot be
+deleted" — so each remains a separate authorisation rather than something this phase performs
+on the strength of a plan.
+
+**Three findings from this phase that are worth more than the two gates:**
+
+1. `prepare` was the load-bearing change, not the gate. Without it a clean-checkout pack emits
+   **4 files and no `dist/`** — a `bin` that installs and then does nothing. Measured.
+2. `attw` and `cargo-semver-checks` are both **inapplicable**, not merely absent — one has no type
+   surface to resolve, the other has no API to check. Neither is wired. Two tools removed from the
+   plan on evidence is a success, not a shortfall.
+3. The tarball gate was itself wrong **1 run in 20** — a `printf | grep -q` SIGPIPE race under
+   `set -o pipefail` that reported a present file as missing. It misattributed itself to `npm pack`
+   and then to a stale temp directory before the real cause was found. Re-verified **0 red in 60
+   runs.** A gate that names the wrong cause is worse than no gate, because it sends you to fix
+   the wrong thing.
+4. The crate gate found a **pre-existing publishing blocker** on its first honest run (§7a). The
+   crate has never been publishable, and no gate in this repository could have found it, because
+   every one of them builds the working tree rather than the packaged artefact.
