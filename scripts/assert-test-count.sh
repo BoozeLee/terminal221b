@@ -22,7 +22,11 @@ set -euo pipefail
 FULL_FLOOR="${1:-390}"
 UNSANDBOXED_FLOOR=$((FULL_FLOOR - 6))
 REPORT="$(mktemp "${TMPDIR:-/tmp}/t221b-vitest-XXXXXX")"
-trap 'rm -f "$REPORT" 2>/dev/null || true' EXIT
+# `rm` on this host is a shim that does not expand its argument, so
+# `rm -f "$REPORT"` removes nothing and the report file leaks on every run.
+# Resolving it explicitly keeps this correct on both this host and a normal one.
+rm_impl() { command rm "$@"; }
+trap 'rm_impl -f "$REPORT" >/dev/null 2>&1 || true' EXIT
 
 # One implementation of the probe, not two. The CLI already knows how to answer
 # "can this host build a sandbox, and if not, which kind of no is it", and a

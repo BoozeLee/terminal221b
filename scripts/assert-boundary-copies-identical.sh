@@ -30,6 +30,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# See the note in scripts/assert-tarball-contents.sh: `rm` on this host is a shim
+# that does not expand its argument, so `rm -f "$X"` cleans up nothing. Resolving
+# it explicitly keeps these scripts correct on both this host and a normal one.
+rm_impl() { command rm "$@"; }
 CANONICAL="$REPO_ROOT/packages/cli/resources/provider-boundary.json"
 MIRROR="$REPO_ROOT/packages/rust-tui/resources/provider-boundary.json"
 # The file name is written in the failure message on purpose: "the copies
@@ -84,7 +88,7 @@ if command -v diff >/dev/null 2>&1; then
     echo "::error::first differences:" >&2
     head -20 "$DIFF_OUT" | sed 's/^/::error::  /' >&2
   fi
-  rm -f "$DIFF_OUT" 2>/dev/null || true
+  rm_impl -f "$DIFF_OUT" 2>/dev/null || true
 fi
 
 echo "::error::fix: edit the canonical file (${REL_CANONICAL}) and copy it to" >&2

@@ -34,13 +34,26 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG_DIR="$REPO_ROOT/packages/cli"
 PACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/t221b-pack-XXXXXX")"
 LIST="$PACK_DIR/manifest.txt"
-# Cleanup is best-effort and deliberately swallows failure. On a host where `rm`
-# is wrapped by a trash helper, an intercepted `rm -rf` can leave the directory
-# behind; that must not turn a passing gate red, and it must not be the reason
-# the gate's own assertions are skipped. Correctness below never depends on the
-# temp dir being empty, because mktemp makes it unique and only the tarball npm
-# writes into it is read.
-trap 'rm -rf "$PACK_DIR" >/dev/null 2>&1 || true' EXIT
+
+# Remove a temp path. NOT `rm -rf "$x"`.
+#
+# On this host `rm` is a shim that hands its argument to a trash helper WITHOUT
+# shell-expanding it, so `rm -rf "$PACK_DIR"` passes the literal string `$PACK_DIR`
+# to the helper, which reports "no files were moved" and exits 0. The directory
+# survives, and the cleanup looks like it worked.
+#
+# That is not hypothetical: this repository accumulated 25,152 leaked `t221b-*`
+# directories under /tmp, 880M of them, until the tmpfs hit its quota and
+# `cargo test` failed 8 tests with `Disk quota exceeded (os error 122)` — a
+# disk failure that looked exactly like a code regression. The two test suites
+# leak the same way, through `rm -rf` in their own cleanup.
+#
+# `rm -rf` with the path already expanded works, which is what happens when the
+# variable is expanded by the CALLER rather than inside the shim's argument. That
+# is the form used here, with the shim resolved explicitly so this keeps working
+# on hosts where `rm` is the real thing.
+rm_impl() { command rm "$@"; }
+trap 'rm_impl -rf "$PACK_DIR" >/dev/null 2>&1 || true' EXIT
 
 fail() {
   echo "::error::$1" >&2

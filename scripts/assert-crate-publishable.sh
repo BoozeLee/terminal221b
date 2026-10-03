@@ -34,9 +34,10 @@ CRATE="terminal221b-tui"
 CRATE_DIR="rust-tui"
 PKG_DIR="$REPO_ROOT/packages/$CRATE_DIR"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/t221b-crate-XXXXXX")"
-# Best-effort: on a host where `rm` is wrapped by a trash helper an intercepted
-# `rm -rf` can leave the directory behind. That must not turn a passing gate red.
-trap 'rm -rf "$WORK" >/dev/null 2>&1 || true' EXIT
+# See the note in scripts/assert-tarball-contents.sh: `rm` on this host is a shim
+# that does not expand its argument, so `rm -rf "$WORK"` cleans up nothing.
+rm_impl() { command rm "$@"; }
+trap 'rm_impl -rf "$WORK" >/dev/null 2>&1 || true' EXIT
 
 fail() {
   echo "::error::$1" >&2
