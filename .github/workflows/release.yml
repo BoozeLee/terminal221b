@@ -1,0 +1,159 @@
+name: Release
+
+# Tag-triggered, and only tag-triggered. A release must come from a named,
+# immutable version — never from whatever is on a branch at the moment.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# contents: write is required to create the release and upload assets. It is
+# the ONLY permission this workflow asks for, and it is not granted to any
+# other job. The gates below run first; if one is red, nothing is written.
+permissions:
+  contents: write
+
+# One release per tag. A second push of the same tag is a mistake, not a retry
+# to race; a failed upload is re-run from the Actions tab instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, verify and attach the release artifact
+    runs-on: ubuntu-24.04
+    steps:
+      # fetch-depth 0 so `git describe` and the version check can see the tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          components: rustfmt, clippy
+
+      # Refuses a tag that disagrees with either manifest. Without this, a tag
+      # saying v0.2.0 over a manifest saying 0.1.0 produces a release whose
+      # notes describe something that was not built.
+      - name: the tag must match both manifests
+        run: |
+          set -euo pipefail
+          ./scripts/verify-release-version.sh "${GITHUB_REF_NAME}" \
+            || { echo "::error::the tag and the manifests disagree; refusing to release"; exit 1; }
+
+      - run: npm ci
+
+      # ---- the full gate set. A red gate here means no upload, no release. ----
+      #
+      # This is the whole point of the workflow. A release that can be produced
+      # from a red tree is a way of shipping a broken build with a green tick
+      # next to it, which is worse than having no release pipeline.
+
+      - name: lint and shellcheck
+        run: |
+          set -euo pipefail
+          npm run lint || { echo "::error::lint failed"; exit 1; }
+          npm run lint:shell || { echo "::error::shellcheck failed"; exit 1; }
+
+      - name: typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck || { echo "::error::typecheck failed"; exit 1; }
+          npm run typecheck:tests || { echo "::error::a test file has a type error"; exit 1; }
+
+      # bubblewrap is not on the ubuntu-24.04 image; without it six sandbox
+      # tests skip silently and the count floor drops. Same reasoning as ci.yml.
+      - name: Install bubblewrap
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+
+      - name: tests
+        run: |
+          set -euo pipefail
+          npm test || { echo "::error::vitest failed"; exit 1; }
+          ./scripts/assert-test-count.sh 390 || { echo "::error::test count floor not met"; exit 1; }
+          npm run test:components || { echo "::error::component tests failed"; exit 1; }
+          ./scripts/assert-component-test-count.sh 4 || { echo "::error::component count floor not met"; exit 1; }
+
+      - name: rust gates
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check || { echo "::error::rustfmt would reformat the tree"; exit 1; }
+          cargo clippy --workspace --all-targets --locked -- -D warnings \
+            || { echo "::error::clippy denied a warning; -D warnings is the gate"; exit 1; }
+          cargo test --workspace --locked || { echo "::error::cargo test failed"; exit 1; }
+          cargo build --workspace --locked || { echo "::error::cargo build failed"; exit 1; }
+
+      # ---- build and verify the artifact ----
+
+      # Runs the pack gate, the boundary gate, refuses a dirty tree, packs, and
+      # writes the .sha256 the installer verifies against.
+      - name: build the release artifact
+        run: |
+          set -euo pipefail
+          ./scripts/build-release.sh || { echo "::error::the release build failed"; exit 1; }
+
+      # A SECOND gate, on the file that will actually be uploaded. The pack gate
+      # checks what npm is about to produce; this checks the artifact itself.
+      - name: assert the release artifact
+        run: |
+          set -euo pipefail
+          ./scripts/assert-release-artifact.sh dist/release/terminal221b-cli-*.tar.gz \
+            || { echo "::error::the artifact about to be published is wrong"; exit 1; }
+
+      # ---- notes from the gate log, not from memory ----
+      #
+      # The v1.0.0 body claimed 445 tests; the tree had 452. A number typed by a
+      # person is not a gate. These come from the run that just happened.
+      - name: record the counts this release actually ran
+        run: |
+          set -euo pipefail
+          {
+            echo "t221b-count-vitest=$(npx vitest run --reporter=json --outputFile=/tmp/vt.json >/dev/null 2>&1; node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/vt.json","utf8"));process.stdout.write(String(r.numPassedTests))')"
+            echo "t221b-count-jest=$(npx jest --ci --json --outputFile=/tmp/jest.json >/dev/null 2>&1; node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/jest.json","utf8"));process.stdout.write(String(r.numPassedTests))')"
+            echo "t221b-count-rust=$(cargo test --workspace --locked 2>&1 | sed -n 's/^test result: ok\. \([0-9]\+\) passed.*/\1/p' | paste -sd+ | bc)"
+          } | tee counts.env
+          cat counts.env
+
+      - name: generate release notes
+        run: |
+          set -euo pipefail
+          T221B_COUNT_LOG=counts.env ./scripts/release-notes.sh "${GITHUB_REF_NAME}" > notes.md
+          cat notes.md
+
+      # ---- publish ----
+      #
+      # `gh` rather than a third-party release action: it ships with the runner,
+      # it needs no pin of its own, and it is one less action whose tag could
+      # move under us. The pin rule is the reason.
+      - name: create the release and upload the artifacts
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME} — Terminal221b CLI" \
+            --notes-file notes.md \
+            dist/release/terminal221b-cli-*.tar.gz \
+            dist/release/terminal221b-cli-*.tar.gz.sha256 \
+            || {
+              echo "::error::the release could not be created."
+              echo "::error::If the tag exists but the upload failed, the tag is harmless:"
+              echo "::error::re-run this workflow, or upload the built asset by hand."
+              echo "::error::Do NOT delete and re-tag — the tag IS the version."
+              exit 1
+            }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terminal221b-release-artifact
+          path: |
+            dist/release/terminal221b-cli-*.tar.gz
+            dist/release/terminal221b-cli-*.tar.gz.sha256
+          if-no-files-found: error

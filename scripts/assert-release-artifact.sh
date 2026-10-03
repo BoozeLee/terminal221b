@@ -17,7 +17,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG_DIR="$REPO_ROOT/packages/cli"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/t221b-artifact-XXXXXX")"
 rm_impl() { command rm "$@"; }
-trap 'rm_impl -rf "$WORK" >/dev/null 2>&1 || true' EXIT
+# cd OUT of the temp dir before the trap runs, and out of the repository too.
+#
+# This script cd's into the extracted package to read it, and a trash helper
+# refuses to remove a directory that is an ANCESTOR OF THE CURRENT DIRECTORY —
+# "trashing this directory would also remove the protected directory inside
+# it". So a trap that simply deleted $WORK left the directory behind every time,
+# once per run. Observed: 3 runs, 3 leftovers.
+trap 'cd /; rm_impl -rf "$WORK" >/dev/null 2>&1 || true' EXIT
 
 fail() {
   echo "::error::$1" >&2
