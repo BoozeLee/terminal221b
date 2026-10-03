@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,6 +19,24 @@ import {
 } from '../src/case.js';
 import { fixtureBundle } from '../src/case-fixtures.js';
 import { canonicalAsset, normalizeAsset, parseBountyScope } from '../src/scope.js';
+
+/**
+ * Scratch directories created by this file, removed when the suite ends.
+ *
+ * They are tracked rather than removed inline because the tests assert on
+ * paths INSIDE them, so a directory has to survive the `it` that created it and
+ * die after the `describe` that needed it. A leak here is invisible per test
+ * run and cumulative across them, which is how a TypeScript fixture leak ended
+ * up filling the tmpfs and failing eight unrelated Rust tests with
+ * `Disk quota exceeded`. See docs/TERMINAL221B-GATES.md section 15.
+ */
+const scratchDirs: string[] = [];
+
+afterAll(() => {
+  for (const dir of scratchDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const sourceJson = {
   version: 1,
@@ -528,6 +546,9 @@ describe('reading a bundle from disk names each way it can fail', () => {
   // assert the designed text, and the control asserts the three failures are
   // genuinely distinct rather than one message reused.
   const dir = mkdtempSync(join(tmpdir(), 'terminal221b-load-'));
+  // Removed when this describe block finishes. The suite asserts on paths
+  // inside it, so it has to outlive the individual `it`s — but not the process.
+  scratchDirs.push(dir);
 
   it('says a missing bundle does not exist, in plain words', async () => {
     const missing = join(dir, 'not-here.json');

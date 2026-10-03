@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { generateKeyPairSync, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -61,9 +61,34 @@ function manifestWith(...keyIdsAndKeys: [string, ReturnType<typeof spkiBase64>][
 const signedFixture = signBundle(unsignedFixture, privateKey, KEY_ID, FIXTURE_NOW);
 const trusted = manifestWith([KEY_ID, spkiBase64()]);
 
-/** A scratch store root that is deleted by the caller's temp dir lifetime. */
+/**
+ * Scratch store roots, removed when the suite ends.
+ *
+ * This file calls `scratchRoot` more than seventy times and had no cleanup at
+ * all, so it was the single largest contributor to what accumulated under /tmp.
+ * The old comment here claimed the directories were "deleted by the caller's
+ * temp dir lifetime" — they were not, and nothing in the file cleans up.
+ *
+ * They are tracked rather than removed inline because the tests assert on paths
+ * inside them, so each has to outlive the `it` that created it and die after
+ * the suite. A leak of this size is invisible per run and cumulative across
+ * them, which is how a TypeScript fixture leak filled the tmpfs and failed eight
+ * unrelated Rust tests with `Disk quota exceeded`. See
+ * docs/TERMINAL221B-GATES.md section 15.
+ */
+const scratchRoots: string[] = [];
+
+afterAll(() => {
+  for (const dir of scratchRoots.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A scratch store root, tracked so `afterAll` can remove it. */
 function scratchRoot(label: string): string {
-  return mkdtempSync(join(tmpdir(), `t221b-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `t221b-${label}-`));
+  scratchRoots.push(dir);
+  return dir;
 }
 
 /** A scratch directory laid out so the fixture's local:// sources hash correctly. */

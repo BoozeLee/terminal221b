@@ -1042,15 +1042,49 @@ output points at disk space, which is what makes it worth writing down: the natu
 reading is a regression in the boundary fix, and chasing that would have meant
 reverting correct work.
 
-**Also still leaking.** The CLI test suites call `rm -rf` through the same shim from
-TypeScript (`analyzers.test.ts`, `case.test.ts`, `executor.test.ts`, `store.test.ts`),
-so one `npm test` still leaks roughly **6.5M** of fixtures. Not fixed — it is 1/130th
-of what was there, and it is a separate commit so the two are not conflated. The
-number is stated so the current figure is not mistaken for zero.
+**Also still leaking — and the first diagnosis of it was wrong.** An earlier version of this
+section attributed the remaining leak to the same `rm` shim, on the grounds that the CLI test
+suites call `rm -rf` on their temp directories. They do not: they call `rm`/`rmSync` from
+`node:fs`, which is a syscall and does not go through a shell at all. Measured:
 
 ```sh
-ls -d /tmp/t221b-* 2>/dev/null | wc -l      # 0 at time of writing
-du -csh /tmp/t221b-* 2>/dev/null | tail -1  # 6.5M, from npm test only
+$ T=$(mktemp -d); node -e 'require("fs").rmSync(process.argv[1],{recursive:true})' "$T"
+$ [ -d "$T" ] && echo LEAKED || echo removed-cleanly
+removed-cleanly
+```
+
+The shim was a real defect and is fixed, but it was **not** the cause of the test-suite leak.
+That one was simpler: three test files created temp directories and never removed them.
+
+| File | `mkdtempSync` per run | Cleanup before |
+|---|---|---|
+| `packages/cli/tests/store.test.ts` | 78 | **none** |
+| `packages/cli/tests/executor.test.ts` | 7 | **none** |
+| `packages/cli/tests/case.test.ts` | 1 | **none** |
+
+`store.test.ts` carried a comment claiming its directories were "deleted by the caller's temp
+dir lifetime". They were not, and nothing in the file deleted them. A comment asserting a cleanup
+that does not exist is worse than no comment.
+
+All three now track their scratch roots and remove them in `afterAll`. They are tracked rather
+than removed inline because the tests assert on paths *inside* them, so each must outlive the
+`it` that created it and die after the suite.
+
+Measured after the fix:
+
+```sh
+npm test                                                   # 391 passed
+ls -d /tmp/t221b-* /tmp/terminal221b-* 2>/dev/null | wc -l  # 0
+```
+
+**0 before, 0 after.** For the record, the sequence that found it: 25,152 directories and 880M
+(cargo test failing 8 Rust tests) → 153 after fixing the shim alone → 5 after three files → 0.
+The shim fix was worth making on its own merits and fixed none of the test-suite leak, which is
+why it is recorded separately from the finding it was originally blamed for.
+
+```sh
+ls -d /tmp/t221b-* /tmp/terminal221b-* 2>/dev/null | wc -l   # 0
+du -csh /tmp/t221b-* 2>/dev/null | tail -1                  # nothing
 df -h /tmp | tail -1
 ```
 

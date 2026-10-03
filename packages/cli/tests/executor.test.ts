@@ -6,12 +6,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { parseTaskContract, type ApprovalRecord } from '../src/case.js';
 import {
@@ -82,9 +83,34 @@ function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
+/**
+ * Every scratch directory this file creates, so `afterAll` can remove them.
+ *
+ * These were never cleaned up. Seven `mkdtempSync` calls, no `afterAll`, and a
+ * suite that seeds a git repository with a worktree in each — which is why
+ * `executor.test.ts` accounted for most of what was left under /tmp.
+ *
+ * That is worth a comment because the symptom pointed somewhere else entirely.
+ * The accumulated directories filled the 32G tmpfs, and the next `cargo test`
+ * failed 8 Rust tests with `Disk quota exceeded (os error 122)`. Nothing in
+ * that output named a TypeScript test file, so the reasonable conclusion was
+ * that a Rust change had broken something. It had not: 61 passed, 0 failed
+ * once /tmp was clear. A leak in one suite presenting as a failure in another
+ * is worth closing at the source.
+ */
+const scratchDirs: string[] = [];
+
 function scratch(label: string): string {
-  return mkdtempSync(join(tmpdir(), `t221b-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `t221b-${label}-`));
+  scratchDirs.push(dir);
+  return dir;
 }
+
+afterAll(() => {
+  for (const dir of scratchDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 /** A committed repository with one tracked source file the tasks can edit. */
 function seedRepo(): string {
@@ -158,7 +184,7 @@ describe('the sandbox probe asks whether a sandbox can be made, not whether a bi
   }
 
   it('calls a present-but-broken bubblewrap broken, not available', () => {
-    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const dir = scratch('stub');
     const broken = brokenStub(dir);
 
     // The assertion that matters: the old `--version` check answers `true` here.
@@ -174,7 +200,7 @@ describe('the sandbox probe asks whether a sandbox can be made, not whether a bi
   });
 
   it('calls a missing binary absent rather than broken', () => {
-    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const dir = scratch('stub');
     expect(probeSandbox(join(dir, 'definitely-not-here')).kind).toBe('absent');
   });
 
@@ -183,7 +209,7 @@ describe('the sandbox probe asks whether a sandbox can be made, not whether a bi
 
     if (capability.kind === 'ok') {
       // A probe that says ok must be backed by an invocation that works.
-      const dir = mkdtempSync(join(tmpdir(), 't221b-probe-'));
+      const dir = scratch('probe');
       const result = bwrapSandbox({
         command: ['/bin/true'],
         cwd: dir,
@@ -204,7 +230,7 @@ describe('the sandbox probe asks whether a sandbox can be made, not whether a bi
     // `allowUnsandboxed` matches on false, and the task runs directly with nothing
     // enforcing its write set. That is a security boundary turning into a
     // configuration detail, and it is the whole reason the probe is three-state.
-    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const dir = scratch('stub');
     const broken = brokenStub(dir);
 
     expect(() =>
@@ -215,7 +241,7 @@ describe('the sandbox probe asks whether a sandbox can be made, not whether a bi
   it('still hands the task to the host when bubblewrap is genuinely absent', () => {
     // The opt-out keeps its meaning. `allowUnsandboxed` is about a host with no
     // sandbox binary, not about a host whose sandbox is broken.
-    const dir = mkdtempSync(join(tmpdir(), 't221b-stub-'));
+    const dir = scratch('stub');
 
     const resolved = resolveSandbox({
       allowUnsandboxed: true,
