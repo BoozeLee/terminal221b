@@ -1,7 +1,7 @@
 {
   "name": "@terminal221b/cli",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "license": "AGPL-3.0-only",
   "description": "Local-first Terminal221b coding assistant CLI.",
   "type": "module",
@@ -29,5 +29,8 @@
   "homepage": "https://github.com/BoozeLee/terminal221b",
   "bugs": {
     "url": "https://github.com/BoozeLee/terminal221b/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
