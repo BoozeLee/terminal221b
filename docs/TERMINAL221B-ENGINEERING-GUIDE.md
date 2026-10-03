@@ -179,7 +179,7 @@ Runtime, root (`package.json`):
 Development: `typescript ~5.9.2`, `vitest ^5.0.2`, `eslint ^10.11.0` with
 `@typescript-eslint/* ^8.71.0`, `@types/react ~19.1.0`.
 
-`@terminal221b/cli` workspace: no runtime dependencies at all. `node:crypto`,
+`terminal221b-cli` workspace: no runtime dependencies at all. `node:crypto`,
 `node:fs`, `node:path` and friends only. The `terminal221b` bin is
 `./dist/cli.js`, `type: module`, and `engines.node >= 22`. **A zero-dependency
 CLI is a deliberate property, not an accident** — it is what makes the case

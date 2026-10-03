@@ -1,4 +1,4 @@
-# @terminal221b/cli
+# terminal221b-cli
 
 The Terminal221b coding assistant as a local-first command line tool.
 
@@ -8,7 +8,7 @@ only when you ask it to, and says so when it does.
 ## Install
 
 ```sh
-npm install -g @terminal221b/cli
+npm install -g terminal221b-cli
 ```
 
 Requires **Node.js 22 or newer**.

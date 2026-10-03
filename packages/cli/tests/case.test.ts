@@ -28,7 +28,7 @@ import { canonicalAsset, normalizeAsset, parseBountyScope } from '../src/scope.j
  * die after the `describe` that needed it. A leak here is invisible per test
  * run and cumulative across them, which is how a TypeScript fixture leak ended
  * up filling the tmpfs and failing eight unrelated Rust tests with
- * `Disk quota exceeded`. See docs/TERMINAL221B-GATES.md section 15.
+ * `Disk quota exceeded`. See docs/TERMINAL221B-GATES.md section 16.
  */
 const scratchDirs: string[] = [];
 

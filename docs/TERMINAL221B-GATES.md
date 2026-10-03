@@ -772,7 +772,7 @@ time than the defect it was hiding.
 ```
 $ npx --yes @arethetypeswrong/cli@0.18.5 terminal221b-cli-0.1.0.tgz
 This package does not contain types.
-{ "packageName": "@terminal221b/cli", "packageVersion": "0.1.0", "types": false }
+{ "packageName": "terminal221b-cli", "packageVersion": "0.1.0", "types": false }
 exit 0
 ```
 
@@ -1005,7 +1005,79 @@ recorded as outstanding in `docs/TERMINAL221B-DONE.md` §3.
 
 ---
 
-## 15. Environmental, not a gate: `rm` does not remove anything on this host
+## 15. The published name, and why it is unscoped
+
+Not a gate. Recorded because the reasoning is not obvious from the name, and because
+the next person to see `terminal221b-cli` may assume an org was created that was not.
+
+**The problem this solves.** The package was going to publish as `@terminal221b/cli`.
+npm gives **no public read on whether a scope name is claimable**:
+
+```sh
+$ curl -o /dev/null -w "%{http_code}" https://www.npmjs.com/org/terminal221b
+403
+$ curl -o /dev/null -w "%{http_code}" https://www.npmjs.com/org/zzz-definitely-not-an-org-9x7q
+403     # an org that certainly does not exist, same answer
+```
+
+403 either way, so the only way to learn whether `@terminal221b` was available was to
+attempt to create the npm organization — an account action, and a failed one leaves a
+half-created org.
+
+**Unscoped names are checkable.** The registry answers definitively, and the probe was
+control-tested in both directions before being trusted:
+
+```sh
+$ for n in express react typescript lodash; do
+    curl -s -o /dev/null -w "$n %{http_code}\n" "https://registry.npmjs.org/$n"; done
+express 200   react 200   typescript 200   lodash 200   # taken -> 200
+$ curl -s -o /dev/null -w "%{http_code}\n" \
+    https://registry.npmjs.org/this-package-really-does-not-exist-9x7q2k
+404                                                                              # free -> 404
+```
+
+`terminal221b-cli` returned 404. So did `terminal221b`, `t221b`, `terminal-221b` and
+`t221b-cli`. The one chosen is the one that reads as "the Terminal221b CLI" without
+colliding with the project name itself.
+
+**What was given up, stated plainly.** A scoped package is protected by the org that owns
+it; an unscoped name can be squatted after the first publish, and the rename means the
+project holds two global names rather than one. Jev was asked to weigh this and chose
+unscoped-now at **0.85** (unscoped 0.90 / keep-scope 0.10). The operator accepted it. For a
+one-maintainer AGPL project where the risk is a future squatter rather than a security
+boundary, that is a reasonable trade — but it is a trade, not a free win.
+
+**The rename is not one line.** Four places couple to the package name, and each fails
+differently if missed:
+
+| Place | Failure if missed |
+|---|---|
+| `packages/cli/package.json` `name` | publishes under the old name |
+| root `package.json` ×3 scripts (`build:cli`, `typecheck`, `cli`) | `--workspace @terminal221b/cli` no longer resolves; `npm run build:cli` breaks |
+| `package-lock.json` | `npm ci` in CI installs inconsistent state |
+| `packages/cli/README.md` | tells users to install a name that does not exist |
+
+The lockfile was regenerated with `npm install --package-lock-only` rather than hand-edited,
+and the result checked for both directions of drift:
+
+```sh
+grep -c "@terminal221b/cli" package-lock.json   # 0
+grep -c "terminal221b-cli"    package-lock.json   # 2
+npm ci && npm ls --workspaces --depth 0          # clean, no "extraneous"
+```
+
+`npm ls` reported the renamed workspace as `extraneous` until the lockfile was regenerated.
+That is the symptom of a half-rename, and it is why the lockfile is regenerated rather than
+sed-ed.
+
+Verified after the rename, all on the same tree: `npm ci` exit 0 · `npm run build:cli` exit 0 ·
+`npm publish --dry-run` → `Publishing to https://registry.npmjs.org/ with tag latest and public
+access` · tarball gate 25 files · `publint` All good · `npm test` 391 · components 4 ·
+`cargo test` 61 · zero temp-dir leaks.
+
+## 16. Environmental, not a gate: `rm` does not remove anything on this host
+
+renumbered from 15 to 16 when section 15 (the published name) was added above it.
 
 Not a gate, and deliberately not made into one. Recorded because it cost real time
 and it presents as a code regression.

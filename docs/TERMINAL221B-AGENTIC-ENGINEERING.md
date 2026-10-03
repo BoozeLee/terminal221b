@@ -33,7 +33,7 @@ At the documented baseline, the product has three distinct surfaces:
 - **Mobile/web:** Expo and React Native chat client, Zustand state,
   AsyncStorage history, native SecureStore for API keys, and direct Anthropic
   text requests. Web keys are memory-only. It is not an agent runtime.
-- **TypeScript CLI:** `packages/cli`, the `@terminal221b/cli` npm workspace.
+- **TypeScript CLI:** `packages/cli`, the `terminal221b-cli` npm workspace.
   It has an Anthropic adapter, bounded local
   context, reviewed diff application, local security triage, scope-manifest
   validation, tool discovery, and a crypto discussion command. It does not

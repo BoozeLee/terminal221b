@@ -95,7 +95,7 @@ The test validates request headers, model and token defaults, and error handling
 
 ## Terminal CLI
 
-The `@terminal221b/cli` workspace builds the `terminal221b` command with Node.js 22 or later. The Rust workspace adds an original full-screen terminal interface using Ratatui and Crossterm.
+The `terminal221b-cli` workspace builds the `terminal221b` command with Node.js 22 or later. The Rust workspace adds an original full-screen terminal interface using Ratatui and Crossterm.
 
 ```sh
 npm ci
@@ -194,7 +194,7 @@ For Omarchy/Arch Linux, `terminal221b setup omarchy --dry-run` prints a package 
 To install just the CLI into a temporary user prefix for a smoke test:
 
 ```sh
-npm pack --workspace @terminal221b/cli --pack-destination /tmp
+npm pack --workspace terminal221b-cli --pack-destination /tmp
 npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1.0.tgz
 /tmp/terminal221b-prefix/bin/terminal221b --help
 ```

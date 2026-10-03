@@ -120,8 +120,8 @@ being re-raised each pass.
 
 | Decision | Blocks | Trigger to revisit |
 |---|---|---|
-| **Who owns the `@terminal221b` npm scope**, and is that name still free? | the npm publish | decided *that* it publishes; the scope must be created before the first publish can be attempted, and npm gives no public read on whether a name is taken — the 403 from `npmjs.com/org/terminal221b` is returned for orgs that do not exist too |
-| crates.io account + 2FA, and the API token for `cargo login` | the crates.io publish | same: the name `terminal221b-tui` was free when checked, and nothing has been published |
+| `npm login`, and 2FA on the npm account | the npm publish | **resolved** — the package is now unscoped as `terminal221b-cli`, whose availability is *provable* offline (registry 404), where a scope's is not |
+| ~~Who owns the `@terminal221b` npm scope?~~ | — | **closed 2026-10-03** — not needed. npm returns 403 for a scope whether or not it exists, so the name could only be learned by attempting to create the org. Renamed to an unscoped name whose availability the registry answers definitively |
 | Does the mobile app ship to stores, or stay internal? | most of Phase 6 | the first store submission |
 | `allowUnsandboxed` when bwrap is present but **broken** | `packages/cli/src/executor.ts` | if a caller ever needs the opt-in |
 | The `AttestedRecord` narrowing (§2) | D1, D2 | next planning round |
@@ -212,8 +212,7 @@ ls -d /tmp/t221b-* /tmp/terminal221b-* 2>/dev/null | wc -l   # 0
 verified by a clean `cargo install` into an isolated `CARGO_HOME`, which compiled and ran, and by
 confirming `resources/provider-boundary.json` is inside the downloaded `.crate`.
 
-`@terminal221b/cli` is not: `npm whoami` is unauthenticated, and the `@terminal221b` scope must
-be created first. Its first publish is permanent — npm's version can be deprecated but never
+`terminal221b-cli` is not: `npm whoami` is unauthenticated. Its first publish is permanent — npm's version can be deprecated but never
 withdrawn, and cargo's is "can never be overwritten, and the code cannot be deleted" — so it
 remains a separate authorisation rather than something this phase performs on the strength of a
 plan.
