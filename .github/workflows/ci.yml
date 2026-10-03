@@ -177,7 +177,7 @@ jobs:
       # `--all-targets` and needs the test targets to lint too.
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -205,6 +205,28 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --workspace --locked || { echo "::error::cargo build failed"; exit 1; }
+
+      # Installed the same way cargo-deny already is in the supply-chain job, so
+      # this adds no third-party action and leaves the every-action-pinned-to-a-SHA
+      # rule intact. The cost is build time on every run; the alternative
+      # (taiki-e/install-action) is faster but is a new trust dependency.
+      - name: install cargo-llvm-cov
+        run: |
+          set -euo pipefail
+          cargo install cargo-llvm-cov --version 0.9.1 --locked \
+            || { echo "::error::cargo-llvm-cov install failed"; exit 1; }
+
+      # Floor measured 2026-10-03 at 65.96% lines (1692/2565); the threshold is
+      # 65, a whole number below it, for the reason register §9 gives — this box is
+      # not the CI machine, and a float threshold would go red for a reason that
+      # has nothing to do with the code. The roadmap's proposed 70 was discarded
+      # rather than adopted: the crate is binary-only, so main.rs sits at 34.39%
+      # and a 70 floor would have been red on arrival.
+      - name: cargo llvm-cov (lines floor 65)
+        run: |
+          set -euo pipefail
+          cargo llvm-cov --workspace --locked --fail-under-lines 65 \
+            || { echo "::error::Rust line coverage is below 65; see docs/TERMINAL221B-GATES.md §10"; exit 1; }
 
   supply-chain:
     name: cargo-deny (advisories / bans / licenses / sources)
