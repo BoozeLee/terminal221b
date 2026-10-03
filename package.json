@@ -11,7 +11,7 @@
     "build:cli": "npm run build --workspace terminal221b-cli",
     "tui": "cargo run -p terminal221b-tui --",
     "build:tui": "cargo build --release -p terminal221b-tui",
-    "lint:shell": "shellcheck packages/cli/resources/*.sh scripts/*.sh",
+    "lint:shell": "shellcheck install.sh packages/cli/resources/*.sh scripts/*.sh",
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "test:components": "jest",
