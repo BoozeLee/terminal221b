@@ -63,6 +63,18 @@ allow = [
     "Unicode-DFS-2016",
     "MPL-2.0",
     "OpenSSL",
+    # The repository's own licence. cargo-deny DOES check workspace members, not
+    # only third-party crates — the first CI run rejected 7 crates for exactly
+    # this, so an earlier comment here claiming it "never matches a third-party
+    # crate, so stating it keeps the file self-describing" was wrong and cost a
+    # red build. Listing it is not cosmetic; it is required.
+    "AGPL-3.0-only",
+    # CDLA-Permissive-2.0 arrives with the Mozilla CA certificate bundle that
+    # reqwest's rustls-tls feature pulls in. It is an OSI-approved permissive
+    # licence with no copyleft and no source-distribution obligation, so it is
+    # compatible with redistributing this AGPL crate. 26 crates carry it, all
+    # from that one data dependency.
+    "CDLA-Permissive-2.0",
 ]
 # The repository's own licence. It is not a dependency, so this never matches a
 # third-party crate, but stating it keeps the file self-describing.

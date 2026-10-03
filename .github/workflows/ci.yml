@@ -176,13 +176,22 @@ jobs:
   secrets:
     name: gitleaks
     runs-on: ubuntu-24.04
-    # Scans the working tree, not the history: `detect --no-git` is the mode that
-    # catches a key someone pasted into a file, which is the failure that actually
-    # happens. History scanning is a separate decision and is not enabled here.
+    # CORRECTED after the first CI run. This comment previously claimed the gate
+    # "scans the working tree, not the history" and that `detect --no-git` was the
+    # mode in use. That was wrong about this job: gitleaks/gitleaks-action scans
+    # the git history, not `--no-git`. The distinction is not academic — the
+    # working tree is clean and a full local history scan finds 36 findings across
+    # 4 commits, so the two modes disagree completely on this repository.
+    #
+    # Left as a hard gate on purpose. An allowlist entry is a decision to say "this
+    # specific value is not a secret", and each one has to be made deliberately
+    # against a named file and rule rather than by muting the job.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 1
+          # Full history, because this job exists to scan history. fetch-depth 1
+          # would silently reduce the gate to the newest commit.
+          fetch-depth: 0
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
