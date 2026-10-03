@@ -285,11 +285,16 @@ The gate reads **schema tests, provenance invariants, threat-model review**. Eac
 
 ```
 $ npx vitest run
- Test Files  14 passed (14)
-      Tests  229 passed (229)
+ Test Files  20 passed (20)
+      Tests  385 passed (385)
 ```
 
-`case.test.ts` (49) still covers the contracts, the reduction rules, and the unknown-field rejection; `path-guard.test.ts` (20) covers the extracted path rules and the `parseTaskContract` guard; `store.test.ts` (67) covers canonicalisation, signing, verification, digest recomputation, and the store lifecycle.
+Re-derive with `npx vitest run` — the numbers above are what the suite reports,
+not a count anyone kept by hand.
+
+`case.test.ts` (55) still covers the contracts, the reduction rules, and the unknown-field rejection; `path-guard.test.ts` (20) covers the extracted path rules and the `parseTaskContract` guard; `store.test.ts` (101) covers canonicalisation, signing, verification, digest recomputation, and the store lifecycle.
+
+`executor.test.ts` runs 28, and **six of those are `it.skipIf(!HAS_BWRAP)`**. On a machine with bubblewrap they execute. On a machine without it they are skipped silently and the run still reports success — the suite's own total drops by six and nothing says so. Re-derive with `npx vitest run --reporter=json --outputFile=/tmp/v.json` and compare `numTotalTests` against `385` and `executor.test.ts`'s count against `28`.
 
 **2. Provenance invariants — PASS.** The invariant suite is the `property invariants` block in `ranking.test.ts`, and it now includes `a confirmation for a different snapshot never confers eligibility` alongside the pre-existing monotonicity and normalisation properties. Run as a group:
 
@@ -297,7 +302,7 @@ $ npx vitest run
 $ npx vitest run packages/cli/tests/case.test.ts packages/cli/tests/ranking.test.ts \
     packages/cli/tests/store.test.ts packages/cli/tests/path-guard.test.ts
  Test Files  4 passed (4)
-      Tests  211 passed (211)
+      Tests  232 passed (232)
 ```
 
 Within that, the four cases under `a case reaches the queue only through human confirmation` are the gate the store exists to close, and the three under `the eligibility gate reads the store trust decision` in `store.test.ts` are the same property seen from the store's side.

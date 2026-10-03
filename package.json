@@ -15,6 +15,7 @@
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",
+    "typecheck:tests": "tsc -p packages/cli/tsconfig.test.json",
     "build": "expo export --platform web"
   },
   "workspaces": [

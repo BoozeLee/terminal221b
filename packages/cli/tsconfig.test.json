@@ -1,0 +1,10 @@
+{
+  "$comment": "Type-checks the CLI's test suite, which the build config cannot cover: its rootDir is src, so adding tests/ would break emit. This config emits nothing and exists only to run the checker over the 18 test files.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

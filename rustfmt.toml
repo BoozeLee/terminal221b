@@ -1,0 +1,18 @@
+# Pinned so `cargo fmt --all -- --check` cannot change meaning under a future
+# toolchain: without this file rustfmt uses whatever its defaults are that release,
+# so a toolchain bump can make an unrelated PR fail formatting.
+#
+# Edition and max_width match what this workspace already uses in practice, so
+# adopting this file must not reformat a single existing line. That is verified by
+# `cargo fmt --all -- --check` returning 0 on the tree where this file is added;
+# if this file ever causes a diff, it changed style rather than recording it.
+
+edition = "2024"
+max_width = 100
+
+# `use_small_heuristics` is left at the default on purpose. It is the setting that
+# most aggressively rewraps function bodies, and pinning it to a value chosen
+# today would freeze formatting decisions rather than record them. Anything that
+# looks wrong in a diff is better fixed at the call site than by a global width.
+
+newline_style = "Unix"

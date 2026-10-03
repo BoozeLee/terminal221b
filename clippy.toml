@@ -1,0 +1,22 @@
+# Declares the MSRV clippy should assume when deciding whether a lint applies.
+#
+# Cargo.toml already sets rust-version = "1.88", and cargo passes that to clippy,
+# so this is redundant today. It is here so the MSRV has one visible home and
+# survives someone removing or bumping rust-version in Cargo.toml without
+# noticing that a lint set silently moved with it.
+#
+# No lint groups are enabled here. Adding `clippy::pedantic` or a restriction
+# group is a gate change, and gates get their own commit with their own
+# rationale and a demonstration that each new lint can actually fail — see
+# FRAMEWORK.md's rule that only L2 may enforce.
+
+msrv = "1.88"
+
+# Unwrap and expect are ordinary in tests and in the boundary-parsing paths where
+# an error has nowhere useful to go. Reporting them in those two places is noise
+# that trains people to ignore the lint everywhere else.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# The crate is a binary, so there is no public API for these to protect.
+check-private-items = false
