@@ -20,6 +20,7 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 |---|---|---|
 | `npm run lint` | `quality` | yes |
 | `npm run lint:shell` | `quality` | yes |
+| provider boundary copies identical (§14) | `quality` | yes |
 | `npm run typecheck` | `quality` | yes |
 | `npm run build:cli` | `quality` | yes |
 | tarball manifest + `publint` (§12) | `quality` | yes |
@@ -679,6 +680,7 @@ to measure first is settled; the measurement is not finished.
 
 ```sh
 ./scripts/assert-tarball-contents.sh
+./scripts/assert-boundary-copies-identical.sh
 npx --yes publint@0.3.25 packages/cli
 ```
 
@@ -858,6 +860,86 @@ written to end. The fix is not mechanical and is **not** taken here; it changes 
 source of truth for the boundary policy lives, and that file is a security policy. See
 `docs/TERMINAL221B-DONE.md` §7.
 
+### 14. Provider boundary copies are identical — `scripts/assert-boundary-copies-identical.sh`
+
+```sh
+./scripts/assert-boundary-copies-identical.sh
+```
+
+**Why a gate about two files that used to be one.** The provider boundary is a security
+policy — no secrets, no wallet custody, no command execution — rendered by two surfaces. It
+is now committed twice:
+
+| Path | Read by |
+|---|---|
+| `packages/cli/resources/provider-boundary.json` | the npm package, at **runtime** |
+| `packages/rust-tui/resources/provider-boundary.json` | the crate, at **compile time** via `include_str!` |
+
+The second copy is not a preference. `include_str!` cannot read outside the crate directory in
+a *published* crate, so without an in-crate copy `terminal221b-tui` does not compile at all
+(§13). Two files means a policy edit can land in one and not the other, and the failure is
+silent: the TUI enforces a weaker boundary than the CLI, and nothing notices.
+
+**The existing drift guards do not catch this, and that is worth being explicit about.**
+`boundary_drift.rs` and `boundary-drift.test.ts` each read **one** file and prove that a
+renderer notices a mutation. That was sufficient while there was one file. With two, every test
+in both files can be green while the copies disagree. The drift arrived by a different route
+than the drift those files were written for.
+
+**Three checks of one invariant**, deliberately rather than redundantly:
+
+| Check | Runs in | Why it is not enough alone |
+|---|---|---|
+| `scripts/assert-boundary-copies-identical.sh` | its own CI step | needs a checkout; nothing else |
+| `boundary_drift.rs` → `the_embedded_copy_is_byte_identical_to_the_canonical_file` | `cargo test` | only for people who run the Rust suite |
+| `boundary-drift.test.ts` → "the crate's copy is byte-identical to this one" | `npm test` | only for people who run the TS suite |
+
+A check that cannot run in some environment should not be the only thing standing between a
+policy edit and a weaker security boundary. The script is the one that works everywhere and
+names the offending file; the tests are the ones that run for anyone who only runs the suites.
+
+**Red proofs, all observed:**
+
+| Probe | Result |
+|---|---|
+| a prohibition removed from the crate's copy | the script names the clause and the line; the Rust test fails; the TS test fails; **the Rust control test fails too** |
+| the crate's copy deleted | `::error::packages/rust-tui/resources/provider-boundary.json is missing.` plus why the crate needs one |
+
+The failure names the differing line, because on a security policy "the files differ" is not
+actionable and "`no_wallet_secrets` is in one and not the other" is.
+
+**A bug this gate found in itself, the same class as §12.** The first version diffed through a
+pipe into `head`:
+
+```sh
+diff -u "$CANONICAL" "$MIRROR" 2>&1 | head -20 | sed 's/^/::error::  /'
+```
+
+Under `set -o pipefail`, `head` closing the pipe early gives `diff` SIGPIPE and the script exits
+**141** — still red, but for a reason that has nothing to do with drift, and it printed
+`diff: missing operand` on top. Caught by the red proof, not by reading the code. It now writes
+the diff to a file and reads it back, and the same probe exits a clean **1**.
+
+That is twice, in two different scripts written hours apart, that a piped `head` under
+`pipefail` produced a failure whose exit code misdescribed its own cause. The pattern is worth
+remembering: **`| head` and `| tail` in a `set -o pipefail` script are a defect**, because they
+turn a normal exit into a signal.
+
+**Design decided with `jev`**, confidence reported because a number without its source is not a
+number:
+
+| Decision | Answer | Confidence |
+|---|---|---|
+| where the canonical file lives | `cli_owns_crate_copies` | **0.96** |
+| how equality is enforced | `script_gate` | **0.62** |
+| intended edit workflow | `edit_canonical_then_sync` | **0.91** |
+
+The 0.62 is the weakest of the three and is the one worth re-asking: `diff_in_both_langs` was
+the runner-up at 0.25. It was not chosen because the TS and Rust suites are split across two CI
+jobs and neither job can see the other language's file as a test input it trusts, so a
+test-only gate would silently protect one surface depending on which suite a contributor
+happens to run. All three checks are wired anyway.
+
 ## Action pins
 
 Every action is pinned to a commit SHA with the tag in a trailing comment. A tag is a
@@ -967,6 +1049,7 @@ cargo build --workspace --locked
 ./scripts/assert-crate-publishable.sh    # needs a clean tree; see section 13
 
 ./scripts/assert-tarball-contents.sh
+./scripts/assert-boundary-copies-identical.sh
 npx --yes publint@0.3.25 packages/cli
 
 gitleaks detect --no-git --source . --redact

@@ -176,48 +176,33 @@ Two gates added, both answering a question no earlier gate could.
 | Gate | Question it answers | Red-proof status |
 |---|---|---|
 | §12 `scripts/assert-tarball-contents.sh` + `publint` | does the **published tarball** contain what it should, and nothing it should not? | 4 red proofs recorded |
-| §13 `scripts/assert-crate-publishable.sh` | would `cargo publish` **succeed**, without publishing? | went red on its first honest run, on a real bug |
+| §13 `scripts/assert-crate-publishable.sh` | would `cargo publish` **succeed**, without publishing? | went red on its first honest run, on a real bug; **green since the fix** |
+| §14 `scripts/assert-boundary-copies-identical.sh` | are the CLI and the TUI enforcing the **same** boundary policy? | 2 red proofs recorded |
 
 Re-derive:
 
 ```sh
 ./scripts/assert-tarball-contents.sh       # 25 files, all accounted for
 npx --yes publint@0.3.25 packages/cli      # All good!
-./scripts/assert-crate-publishable.sh      # RED — see below
+./scripts/assert-crate-publishable.sh      # publishable — packaging, metadata, verify build
+./scripts/assert-boundary-copies-identical.sh   # the CLI and the TUI agree
 ```
 
-### 7a. `terminal221b-tui` has never been publishable, and §13 found it
+### 7a. `terminal221b-tui` was unpublishable — found, fixed, and now gated
 
-The crate gate is **red**, and it is red for a real reason rather than a planted one:
+This section previously reported a blocker and left it standing. It is fixed.
 
-```
-error: couldn't read `src/../../cli/resources/provider-boundary.json`: No such file or directory
-   --> src/boundary.rs:154:5
-    |
-154 |     include_str!("../../cli/resources/provider-boundary.json")
-```
+`boundary.rs` embedded the provider boundary with `include_str!("../../cli/resources/
+provider-boundary.json")` — a path leaving the crate directory. It resolves in this repository
+and cannot resolve in a packed crate, so the crate **has never been publishable**. It survived
+because every Rust gate builds the working tree; only `cargo publish --dry-run` builds the
+packaged artefact, and that is the gate that found it.
 
-`boundary.rs:154` embeds the provider boundary through a path that **leaves the crate directory**.
-It resolves in this repository, where `packages/cli/` sits beside `packages/rust-tui/`, and it
-cannot resolve inside a packed crate, where only the crate's own files travel. So the crate would
-fail on the first publish attempt to crates.io — after the name was claimed, and irrecoverably.
-
-Confirmed pre-existing: it reproduces against `22e9f75`, before this phase touched `Cargo.toml`.
-Every prior Rust gate passed because every prior Rust gate builds the working tree; this is the
-first gate in the repository to build the **packaged** artefact.
-
-**This is not fixed here, deliberately.** The obvious fixes — copy the boundary file into the
-crate, or add a `build.rs` that copies it — both create a second copy of a **security policy**
-file, and both can drift from the TypeScript side silently. That is precisely the failure
-`boundary_drift.rs` and `boundary-drift.test.ts` were written to prevent, and reintroducing it to
-satisfy a packaging gate would trade a loud failure for a quiet one. The durable fix is to decide
-where the single source of truth lives and make the other side read it, which is a design decision
-about a policy file, not a mechanical edit.
-
-**So the crate gate is left red on purpose.** It is wired, blocking, and honest. Per this
-repository's own doctrine, a permanently-red gate is a training failure — but a gate that is
-disabled, or deleted because its finding is inconvenient, is the failure this whole programme was
-assembled to prevent. The red is the finding.
+The fix keeps the canonical file in `packages/cli/` (the npm package reads it at runtime) and
+gives the crate its own copy, which is what `include_str!` requires. That created a new failure
+mode — the policy now exists twice — so the copy is enforced three ways, and
+`scripts/assert-boundary-copies-identical.sh` is the one that names the file that drifted.
+Without it the fix would have traded a loud failure for a quiet one on a security policy.
 
 **Neither package has been published.** `npm whoami` is unauthenticated and there is no
 `~/.cargo/credentials.toml`. Both first publishes are permanent — npm's version can be
@@ -238,5 +223,10 @@ on the strength of a plan.
    runs.** A gate that names the wrong cause is worse than no gate, because it sends you to fix
    the wrong thing.
 4. The crate gate found a **pre-existing publishing blocker** on its first honest run (§7a). The
-   crate has never been publishable, and no gate in this repository could have found it, because
-   every one of them builds the working tree rather than the packaged artefact.
+   crate had never been publishable, and no gate in this repository could have found it, because
+   every one of them builds the working tree rather than the packaged artefact. Fixed in `c5e94e0`
+   and gated in `8f309e9`.
+5. The same `| head`-under-`pipefail` defect appeared **twice**, in two scripts written hours
+   apart, each producing a red whose exit code misdescribed its own cause (141/SIGPIPE instead of
+   1). Both were caught by their red proofs, not by reading the code. `| head` and `| tail` in a
+   `set -o pipefail` script are a defect, and that is now written down in register §§12 and §14.
