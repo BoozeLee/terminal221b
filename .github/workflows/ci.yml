@@ -108,22 +108,31 @@ jobs:
           ./scripts/assert-component-test-count.sh 4 || { echo "::error::component test count floor not met"; exit 1; }
 
   typecheck-tests:
-    name: Typecheck the CLI test suite (NON-BLOCKING)
+    name: Typecheck the CLI test suite
     runs-on: ubuntu-24.04
-    # Deliberately non-blocking, and this comment is the reason.
+    # BLOCKING, and the continue-on-error that stood here is gone.
     #
-    # packages/cli/tsconfig.test.json (roadmap item 0.3) surfaces 6 real type
-    # errors that no gate has ever seen, because packages/cli/tsconfig.json has
-    # include ["src/**/*.ts"] and rootDir src — the 385 tests are transformed by
-    # vitest and never seen by tsc. The fork those 6 encode (was AttestedRecord's
-    # narrowing deliberate, on the signature/digest path?) was escalated to a human
-    # and is unresolved. A blocking gate that is red for a known, adjudicated
-    # reason trains everyone to ignore a red check. So the gate is wired and
-    # visible, and it does not block, until the fork is decided.
+    # It stood because packages/cli/tsconfig.test.json (roadmap item 0.3) surfaced
+    # 6 type errors no gate had ever seen — packages/cli/tsconfig.json has
+    # include ["src/**/*.ts"] and rootDir src, so the tests are transformed by
+    # vitest and never seen by tsc. Four were AttestedRecord call sites, one was a
+    # wrong module import that had made a test vacuous, one was a Map tuple
+    # inference. The fork behind the four (was AttestedRecord's narrowing
+    # deliberate, on the signature/digest path?) was escalated to a human and is
+    # now DECIDED: deliberate. So the tests were wrong and the types were right.
     #
-    # When the fork is decided: fix the errors, then delete this
-    # continue-on-error line in the same commit that makes it green.
-    continue-on-error: true
+    # be2934f fixed the tests without touching packages/cli/src. This commit only
+    # makes the gate count. Doctrine: a gate everyone has learned to ignore is
+    # worse than no gate, and this one was red-but-passing for the whole life of
+    # the programme.
+    #
+    # Proven red: referencing a field that does not exist on ApprovalRecord gives
+    #   store.test.ts(272,34): error TS2339: Property
+    #   'noSuchFieldOnApprovalRecord' does not exist on type 'ApprovalRecord'.
+    #   exit 2
+    # The first attempt at that proof was `x as unknown as number`, which is a
+    # LEGAL double cast and therefore not a type error at all. It exited 0. A red
+    # proof that does not go red is worse than none, so it is recorded here.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -134,7 +143,7 @@ jobs:
       - name: typecheck:tests
         run: |
           set -euo pipefail
-          npm run typecheck:tests || { echo "::error::typecheck:tests failed (non-blocking, fork unresolved)"; exit 1; }
+          npm run typecheck:tests || { echo "::error::typecheck:tests failed — a test file has a type error"; exit 1; }
 
   rust:
     name: Rust fmt / clippy / test / build

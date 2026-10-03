@@ -15,9 +15,9 @@ The programme is finished when **all three** of these are true. Not two of three
 
 | # | Criterion | How to check | Current |
 |---|---|---|---|
-| D1 | Every gate in the register is **green and blocking** | `gh run list --repo BoozeLee/terminal221b --branch feature/installable-terminal --limit 1` — no job may carry `continue-on-error` | **NOT MET** — see §2 |
-| D2 | No gate in the register is **red, or red-but-non-blocking** | `docs/TERMINAL221B-GATES.md` §5 is the only exception, and it is an open operator decision | **NOT MET** — see §2 |
-| D3 | Every gate in the register has a **recorded red proof** | each `### N` section of the register shows the defect and the exit code | **MOSTLY MET** — 2 of 9 outstanding, see §3 |
+| D1 | Every gate in the register is **green and blocking** | see the yaml check below → `continue-on-error present: False` | **MET** |
+| D2 | No gate in the register is **red, or red-but-non-blocking** | `npm run typecheck:tests` → `exit 0` | **MET** |
+| D3 | Every gate in the register has a **recorded red proof** | each `### N` section of the register shows the defect and the exit code | **MET for every gate that can be made to fail on demand** — §3 |
 
 **D1 and D2 are one decision, not two.** The only reason D1 fails today is the single
 `continue-on-error: true` in `.github/workflows/ci.yml`. Until the `AttestedRecord`
@@ -25,26 +25,30 @@ fork is decided, the programme is not finished and cannot honestly claim to be.
 
 ---
 
-## 2. The one thing blocking D1 and D2
+## 2. D1 and D2 — closed 2026-10-03
 
-`.github/workflows/ci.yml` runs `npm run typecheck:tests` with
-`continue-on-error: true`. It exits 2. That gate has been red and non-blocking for
-the whole programme.
+This section used to say the programme could not finish. It can.
 
-`packages/cli/src/store.ts:125` defines `AttestedRecord`, and
-`packages/cli/src/store.ts:155` casts the bundle field straight to it. The six errors
-are on the signature/digest path. The question is whether that narrowing was
-deliberate.
+`npm run typecheck:tests` was the only job in `.github/workflows/ci.yml` carrying
+`continue-on-error: true`, and it was the only reason D1 and D2 failed. Its six errors
+came from `packages/cli/tsconfig.test.json`, which reaches the 18 CLI test files that
+`packages/cli/tsconfig.json` cannot, because that one's `include` is `["src/**/*.ts"]`.
 
-**This is an operator decision and an agent will not make it.** The fork is recorded
-in `docs/TERMINAL221B-GATES.md` §5.
+The fork was escalated and is now **decided: the `AttestedRecord` narrowing is
+deliberate.** `packages/cli/src/store.ts:125` defines it as `{ version: 1;
+attestation?: Attestation }`, and `recordsOfKind` at `store.ts:154` casts because the
+five per-kind types cannot be expressed generically. The comment above
+`attestationPayload` at `store.ts:432` gives the reason the erasure is load-bearing on
+the provenance path.
 
-**Trigger, so this stops being re-litigated every pass:** if no decision is recorded
-by the next planning round, the gate is **deleted**, along with `typecheck:tests` and
-`tsconfig.test.json`. A red gate that everyone has learned to ignore is worse than no
-gate, and this one has already been ignored for the length of the programme. Deleting
-it is not a loss — the six errors return the moment anyone edits
-`packages/cli/src/store.ts` and turns on typechecking for tests.
+So the tests were wrong, and **no production type was weakened** — `be2934f` touches
+nothing under `packages/cli/src/`. The gate went blocking in `2f6d0cf` and exits 0.
+
+One of the six was not a fork at all but a bug, and a worse one. `ranking.test.ts`
+imported `parseBountyScope` from `../src/case.js`, which does not re-export it, so it
+was `undefined` — and the only test using it asserted that calling it throws, which
+`TypeError: not a function` satisfies. That test had been green while proving nothing.
+Fixed in `5a5a88f`.
 
 ---
 
@@ -79,7 +83,15 @@ Re-derive the audit:
 ```sh
 grep -cE '^### [0-9]' docs/TERMINAL221B-GATES.md        # 9 gate sections
 grep -n 'Proven red\|Red proofs' docs/TERMINAL221B-GATES.md
-grep -c 'continue-on-error: true' .github/workflows/ci.yml   # 1
+npm run typecheck:tests; echo "exit $?"                  # exit 0
+```
+
+`continue-on-error` cannot be counted with `grep`, because the ci.yml comment
+explaining why it was removed contains the string. Ask the YAML instead:
+
+```sh
+python3 -c "import yaml; print('continue-on-error present:', 'continue-on-error' in yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['typecheck-tests'])"
+# continue-on-error present: False
 ```
 
 ### 3a. Corrections to the record

@@ -292,11 +292,11 @@ exit 1
 **If you re-run this receipt, do not use a documented example key.** It will pass and
 tell you the gate works when it has told you nothing.
 
-### 5. `npm run typecheck:tests` — wired, deliberately non-blocking
+### 5. `npm run typecheck:tests` — BLOCKING, and green
 
 `packages/cli/tsconfig.test.json` (roadmap 0.3) type-checks the 18 CLI test files that
 `packages/cli/tsconfig.json` cannot reach, because its `include` is `["src/**/*.ts"]`
-and its `rootDir` is `src`. It surfaces six real errors that no gate had ever seen:
+and its `rootDir` is `src`. It surfaced six errors that no gate had ever seen:
 
 ```
 dossier.test.ts(241,18)  TS2769  new Map(…) arg is (string | string[])[][], not
@@ -311,31 +311,48 @@ store.test.ts(463,20)    TS2345  'AttestedRecord' missing 5 props required by
 exit 2
 ```
 
-**It is `continue-on-error: true` on purpose.** `AttestedRecord`
-(`packages/cli/src/store.ts:125`) is deliberately minimal — `{ version: 1;
-attestation?: Attestation }` — with kind-specific identifiers held in a runtime
-`ID_FIELD` map and reached through `as unknown as` in `recordsOfKind`. That erasure
-sits directly on the provenance path (`attestationPayload`, `payloadDigestOf`,
-`verifyRecord`) behind findings F4 (signature) and F5 (digest). Whether the narrowing
-was deliberate hardening that the tests failed to follow, or a type narrowed past its
-tests, is not decidable from the tree. That question was escalated rather than guessed.
+**The fork is decided: the narrowing is deliberate.** `AttestedRecord`
+(`packages/cli/src/store.ts:125`) is `{ version: 1; attestation?: Attestation }`, with
+kind-specific identifiers held in a runtime `ID_FIELD` map and reached through
+`as unknown as` in `recordsOfKind`. That erasure sits on the provenance path
+(`attestationPayload`, `payloadDigestOf`, `verifyRecord`) behind findings F4
+(signature) and F5 (digest), and the comment above `attestationPayload` gives the
+reason: stripping a signature must never alter what the signature commits to. The
+operator confirmed the tests were at fault.
 
-A blocking gate that is red for a known, adjudicated reason teaches everyone to ignore
-a red check, which is worse than no gate. The gate is wired and visible; it does not
-block until the fork is decided. **When it is decided, delete the `continue-on-error`
-line in the same commit that makes it green.**
+**So the tests were fixed and no production type was touched** — `be2934f`, which
+modifies nothing under `packages/cli/src/`. The four AttestedRecord call sites now use
+the typed bundle field for the same object, and the digest literal is annotated
+`: ConfirmationRecord` because against the weak base type a fresh `statement` reads as
+an excess property.
 
-**Decision recorded 2026-10-03: leave it escalated.** The fork was routed to
-`jev_judge`, which returned `escalate-to-human` at 0.64 confidence with the
-distribution *escalate **0.72** · fix-tests 0.20 · fix-tests-plus-gate 0.07 ·
-fix-code **0.01***, and the operator confirmed the escalation stands. The reasoning
-is that the narrowing is deliberate hardening on the provenance path: widening
-`AttestedRecord` to satisfy a test scored 0.01 because it would undo a constraint
-that keeps consumers from depending on a shape the bundle author also controls.
+`ranking.test.ts(4,3)` was a bug, not a fork, and a worse one. It imported
+`parseBountyScope` from `../src/case.js`, which does not re-export it, so it was
+`undefined`; the one test using it asserted only that calling it throws, and
+`TypeError: not a function` satisfies that. The test was green while exercising
+nothing. Fixed in `5a5a88f`, with the proof in §8's style: the same neutered validator
+that left the old test passing makes the corrected one fail.
 
-So this gate stays non-blocking **by decision, not by omission**. Its exit code is 2
-and that is the expected state. Reopening it means a human reversing this decision,
-not an agent noticing a red check.
+`dossier.test.ts(241,18)` is unrelated to any of it — a Map constructor needs a tuple
+and an unannotated arrow infers a union. Annotated the callback's return type.
+
+**`npm run typecheck:tests` now exits 0 and the job is blocking.** The
+`continue-on-error: true` line is gone, which was always the instruction attached to
+this decision. This was the only permanently-red gate in the repository, and it was
+red for the entire life of the programme.
+
+**Proven red:**
+
+```
+$ # reference a field that does not exist on ApprovalRecord
+store.test.ts(272,34): error TS2339: Property 'noSuchFieldOnApprovalRecord'
+  does not exist on type 'ApprovalRecord'.
+exit 2
+```
+
+The first attempt at that proof was `x as unknown as number`, which is a **legal**
+double cast and therefore not a type error at all. It exited 0. A red proof that does
+not go red is worse than none, so it is recorded rather than quietly replaced.
 
 ### 6. `cargo deny check all`
 
