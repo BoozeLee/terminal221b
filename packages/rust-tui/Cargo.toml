@@ -6,6 +6,20 @@ rust-version = "1.88"
 description = "An original local-first Rust TUI for Terminal221b"
 license = "AGPL-3.0-only"
 repository = "https://github.com/BoozeLee/terminal221b"
+readme = "README.md"
+# A bin-only crate: there is no lib target, so there is no rustdoc to host and no
+# public API to document. The value below is the crate page, which is where
+# crates.io sends a reader who wants generated docs.
+documentation = "https://docs.rs/terminal221b-tui"
+keywords = ["tui", "cli", "assistant", "terminal", "ratatui"]
+categories = ["command-line-utilities", "development-tools"]
+# The CLI npm package is the primary distribution surface. This is recorded so a
+# reader landing on the crate page knows which artefact to install.
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "README.md",
+]
 
 [[bin]]
 name = "terminal221b-tui"
