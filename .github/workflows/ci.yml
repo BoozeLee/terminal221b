@@ -53,6 +53,21 @@ jobs:
           set -euo pipefail
           npm run lint:shell || { echo "::error::shellcheck failed"; exit 1; }
 
+      # The provider boundary is a security policy rendered by two surfaces, and
+      # it now exists as two committed files: packages/cli reads its copy at
+      # runtime, the Rust crate embeds its own at compile time because
+      # include_str! cannot reach outside a published crate. This is what stops a
+      # policy edit from landing in one and not the other, which would leave the
+      # TUI enforcing a weaker boundary than the CLI and no test noticing.
+      #
+      # It runs before typecheck on purpose: a drifted boundary is a security
+      # finding, not a build error, and it should not be discovered after a
+      # compile failure has drawn attention elsewhere.
+      - name: provider boundary copies are identical
+        run: |
+          set -euo pipefail
+          ./scripts/assert-boundary-copies-identical.sh || { echo "::error::the CLI and the TUI are enforcing different provider boundaries"; exit 1; }
+
       - name: typecheck
         run: |
           set -euo pipefail

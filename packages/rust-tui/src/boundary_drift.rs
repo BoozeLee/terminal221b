@@ -151,4 +151,35 @@ mod tests {
             }
         }
     }
+
+    /// The question every other test in this file does NOT ask.
+    ///
+    /// They all mutate one in-memory copy and prove the renderer notices. That
+    /// was sufficient while both surfaces read one file, and stopped being
+    /// sufficient the moment there were two — a policy edit that updated
+    /// `packages/cli/resources/` and not `packages/rust-tui/resources/` would
+    /// leave every test here green while the TUI enforced a weaker boundary than
+    /// the CLI. That is the drift this module was written to prevent, arriving
+    /// by a different route.
+    ///
+    /// This compares the embedded text against the canonical file's bytes at
+    /// runtime. It needs no filesystem access: `include_str!` in the test gives
+    /// the mirror, and the canonical file is embedded the same way. Both are
+    /// compile-time inputs, so a test that cannot read the file it is checking
+    /// fails to build rather than passing quietly.
+    #[test]
+    fn the_embedded_copy_is_byte_identical_to_the_canonical_file() {
+        const CANONICAL: &str = include_str!("../../cli/resources/provider-boundary.json");
+
+        assert_eq!(
+            boundary_source(),
+            CANONICAL,
+            "the crate's copy of the provider boundary has drifted from \
+             packages/cli/resources/provider-boundary.json.\n\
+             Edit the canonical file and copy it to \
+             packages/rust-tui/resources/provider-boundary.json in the same commit. \
+             A boundary the CLI and the TUI do not share is a boundary one of them \
+             is not enforcing."
+        );
+    }
 }
