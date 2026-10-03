@@ -20,7 +20,6 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -143,23 +142,22 @@ pub struct Boundary {
     pub(crate) file: BoundaryFile,
 }
 
-/// The one file both surfaces read. Path is resolved from the crate root so the
-/// test and the binary cannot disagree about which file they are reading.
-pub fn boundary_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("cli")
-        .join("resources")
-        .join("provider-boundary.json")
+/// The one file both surfaces read, embedded at compile time.
+///
+/// This resolved an absolute path from the crate manifest directory and read
+/// the file at startup, which meant the compiled binary only worked on the
+/// machine that built it, and only while that file still sat at that absolute
+/// path. Embedding makes the file a build input instead: the binary carries it,
+/// and a missing file is a compile error rather than a runtime failure on a
+/// machine that never had it.
+pub fn boundary_source() -> &'static str {
+    include_str!("../../cli/resources/provider-boundary.json")
 }
 
 impl Boundary {
     pub fn load() -> Result<Self, String> {
-        let path = boundary_path();
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let file: BoundaryFile = serde_json::from_str(&raw)
-            .map_err(|error| format!("cannot parse {}: {error}", path.display()))?;
+        let file: BoundaryFile = serde_json::from_str(boundary_source())
+            .map_err(|error| format!("cannot parse the embedded provider boundary: {error}"))?;
         if file.version != ENVELOPE_VERSION {
             return Err(format!(
                 "provider boundary is version {}, this crate understands {ENVELOPE_VERSION}",

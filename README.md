@@ -199,7 +199,7 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 /tmp/terminal221b-prefix/bin/terminal221b --help
 ```
 
-For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
+For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is currently unpublished (`private: true` in its manifest) — a distribution choice, not a licence one; the licence below permits redistribution under its own terms.
 
 The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute model-directed tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers. Crypto ideas and project analysis can be discussed with the existing chat prompt, but the CLI does not trade NFTs/tokens, manage wallets, or submit bounty reports.
 
@@ -212,7 +212,7 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
 - `npm audit --omit=dev` reports unresolved advisories in the dependency tree, including critical and high severity findings. Major Expo upgrades were not applied automatically.
-- The repository retains its proprietary license; it is not MIT-licensed.
+- Terminal221b is licensed under the GNU Affero General Public License v3.0 only. It is not MIT-licensed.
 
 ## Roadmap
 
@@ -234,7 +234,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks.
 
 ## License
 
-The repository is distributed under the terms in [LICENSE](LICENSE). The license is proprietary; do not redistribute or reuse it without permission.
+Terminal221b is licensed under the GNU Affero General Public License v3.0 only. Redistribution and reuse are permitted under that licence's terms; its copyleft and source-availability obligations apply, so a modified version distributed to users must offer its corresponding source. That is deliberate and not an oversight — the request boundary in `provider-boundary.json` is the asset being protected. See [LICENSE](LICENSE) for the full terms.
 
 ## Security
 

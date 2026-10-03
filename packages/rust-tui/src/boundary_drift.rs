@@ -9,11 +9,13 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::boundary::{Boundary, BoundaryFile, boundary_path};
+    use crate::boundary::{Boundary, BoundaryFile, boundary_source};
 
     fn load() -> BoundaryFile {
-        let raw = std::fs::read_to_string(boundary_path()).expect("the boundary file reads");
-        serde_json::from_str(&raw).expect("the boundary file parses")
+        // The same embedded text the binary ships with, not a second read of a
+        // file on disk: a test that reads the file itself would pass on a
+        // machine where the binary was built from a different copy.
+        serde_json::from_str(boundary_source()).expect("the boundary file parses")
     }
 
     fn render_from(file: &BoundaryFile, profile: &str) -> String {
