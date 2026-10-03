@@ -66,8 +66,35 @@ overrides`). Reconciling that divergence is a decision, not a mechanical step.
 
 ## Proving the secrets gate
 
-The `secrets` job runs gitleaks over the working tree with `--no-git`, so it catches
-a key pasted into a file rather than one in history.
+The `secrets` job runs `gitleaks/gitleaks-action`, which scans **git history**, with
+`fetch-depth: 0` so a shallow clone cannot silently reduce the gate to one commit.
+
+**Local and CI do not scan the same thing, and that trips people up.** A bare
+`gitleaks detect --source .` on a developer machine reports **36 findings across 4
+commits** in this repository. None of them are reachable from `public/main` or from
+the branch that CI scans:
+
+| Commit | Subject | Reachable from `public/main`? |
+|---|---|---|
+| `35f759d` | Terminal221B PAO — complete agent implementation | no |
+| `7c41200` | Wire up real API integrations | no |
+| `8f52637` | Fix Groovy dependencies — remove Slf4j | no |
+| `e1749a3` | `[#9150][feat] AutoDeploy Nemotron-Flash` | no |
+
+They live only in a **stale local remote-tracking ref**, `archive/main`. `archive`
+and `public` are the same URL, so that ref points at history the public repository
+does not contain — and its commits are visibly from a different project (Groovy
+build files, Maven-style PR numbering). Scoped to this branch, the history is clean:
+
+```sh
+gitleaks git --log-opts="HEAD" --redact .     # 53 commits, no leaks, exit 0
+```
+
+**So there is no exposure, and the reason is worth knowing before chasing it.** Do
+not rewrite history and do not allowlist these — an allowlist entry says "this named
+value is not a secret", and the honest answer for off-branch history is that it is
+not ours to scan, not that it is safe. If you want the local scan to match CI, scope
+it with `--log-opts`.
 
 **When proving this gate can go red, do not use a documented example credential.**
 Planting `AKIAIOSFODNN7EXAMPLE` with the well-known example secret produces

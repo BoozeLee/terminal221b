@@ -51,8 +51,8 @@ separates "the jump" from "the thing the jump broke".
 ## Component tests: the SDK-matched runner rule
 
 The app has **24 tests across 2 files** — `src/services/api/ClaudeService.test.ts`
-(21) and `src/store/chatStore.test.ts` (3) — on vitest, out of 385 in the
-repository. The CLI holds the other 361 across 18 files.
+(21) and `src/store/chatStore.test.ts` (3) — on vitest, out of 390 in the
+repository. The CLI holds the other 366 across 18 files.
 
 `jest-expo` dist-tags: `sdk-54` = 54.0.18, `latest` = 57.0.5. And `jest-expo@latest`
 peer-requires `@react-native/jest-preset ^0.86.3` — an SDK 57-era dependency set.
@@ -84,12 +84,12 @@ npx expo install --check          # must report no version mismatches
 npx expo-doctor                   # rc=0
 npx tsc --noEmit                  # rc=0
 npm test                          # rc=0, same test count as before the upgrade
-npm run test:count                # rc=0 — asserts 385 executed, not merely collected
+npm run test:count                # rc=0 — asserts 390 executed, not merely collected
 npx expo export --platform web    # rc=0
 ```
 
 The `test:count` step is the one that catches an SDK bump silently skipping tests.
-After an upgrade, re-derive the floor rather than assuming 385 still holds: a
+After an upgrade, re-derive the floor rather than assuming 390 still holds: a
 newly-skipped conditional suite is exactly the failure an SDK change causes.
 
 ## Rules

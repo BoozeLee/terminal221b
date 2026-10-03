@@ -128,7 +128,7 @@ it fails. A test that cannot fail is worse than no test, because it reads as cov
 ## Commands
 
 ```sh
-npm test                                              # the whole suite; store.test.ts is 101 of the 385
+npm test                                              # the whole suite; store.test.ts is 101 of the 390
 npx vitest run packages/cli/tests/store.test.ts \
   packages/cli/tests/ranking.test.ts \
   packages/cli/tests/case.test.ts \

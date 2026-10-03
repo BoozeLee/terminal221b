@@ -24,7 +24,8 @@ installed yet — see `FRAMEWORK.md` §6 and the sequencing note at the end.
 | `npm run build:cli` | `quality` | yes |
 | `npm run build` | `quality` | yes |
 | `npm test` | `quality` | yes |
-| executed test count ≥ 385 | `quality` | yes |
+| executed test count ≥ 390 (384 without a sandbox) | `quality` | yes |
+| sandbox capability probe | `rust`-adjacent: exercised by `quality` and by `executor.test.ts` | yes |
 | `cargo fmt --all -- --check` | `rust` | yes |
 | `cargo clippy … -D warnings` | `rust` | yes |
 | `cargo test --workspace --locked` | `rust` | yes |
@@ -79,32 +80,110 @@ exit 1
 
 Reverted; re-checked green at exit 0.
 
-### 3. Executed test count ≥ 385
+### 3. Executed test count — capability-aware, 390 or 384
 
-The six `it.skipIf(!HAS_BWRAP)` cases in `executor.test.ts` do nothing on a machine
-without bubblewrap, and the run still exits 0. The suite's own total is therefore
-environment-dependent and nothing reports the drop.
+Six `it.skipIf(!sandbox)` cases in `executor.test.ts` do nothing when a sandbox
+cannot be built, and the run still exits 0. The suite's own total is therefore
+environment-dependent, and the six skipped cases are the *only* reason it moves.
 
 ```sh
-./scripts/assert-test-count.sh 385      # or: npm run test:count
+./scripts/assert-test-count.sh 390      # or: npm run test:count
 ```
 
-**Proven red, twice.**
+The floor is a function of the same capability the tests gate on, read through the
+same `probeSandbox` the CLI uses, so there is one implementation rather than a bash
+copy that drifts from it:
 
-*Wrong floor* — `./scripts/assert-test-count.sh 999`:
+| Probe result | Floor | Why |
+|---|---|---|
+| `ok` | **390** | a sandbox can be built, so all six must run |
+| `absent` | **384** | no bubblewrap on this host |
+| `broken` | **384** | bubblewrap is here and cannot sandbox |
+| any | **≥ 384** | below this, something *other* than the six skips is losing tests, and it fails under every capability |
+
+**Proven red, twice, and green in the two states that matter.**
+
+*Floor above the real count* — `./scripts/assert-test-count.sh 391`:
 ```
-executed: 385/385 tests across 87 files (floor 999)
-::error::only 385 tests executed, expected at least 999.
+executed: 390/390 tests (ok: sandbox available, full floor 391)
+::error::only 390 tests executed, expected at least 391.
+::error::Applicable floor was 391 because the probe said 'ok'.
 exit 1
 ```
 
-*Bubblewrap absent* — same script with `bwrap` off `PATH`:
+*Broken sandbox, baseline guard* — a `bwrap` stub reproducing the runner's 0.9.0
+failure, floor 391:
 ```
-::error::bubblewrap is absent, so the six it.skipIf(!HAS_BWRAP) cases in
-::error::executor.test.ts would skip silently and the suite would report
-::error::379 instead of 385. Install bubblewrap first.
+executed: 384/390 tests (broken: bubblewrap is present but cannot build a sandbox, so 6 sandbox tests were skipped)
+  sandbox detail: bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+::error::only 384 tests executed, below the 385 baseline
+::error::that holds under every sandbox capability, so something other than
+::error::the six sandbox skips is losing tests.
 exit 1
 ```
+
+*Broken sandbox, accounted for* — same stub, floor 390:
+```
+executed: 384/390 tests (broken: bubblewrap is present but cannot build a sandbox, so 6 sandbox tests were skipped)
+  sandbox detail: bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+note: 6 tests skipped, all of them the sandbox suite, all accounted for
+exit 0
+```
+
+The gap between collected and executed is itself checked: 0 skips when the probe
+says `ok`, exactly 6 when it does not, anything else fails as a silent skip nobody
+accounted for.
+
+**A note on how these proofs were produced.** Raising the *floor* above the real
+count is what makes this gate red — a lower floor is satisfied by more tests, so
+"pass 385 instead of 390" proves nothing. The `absent` classification is proven at
+the probe (`probeSandbox('/nonexistent')` → `absent`, a unit test) rather than
+end-to-end, because `execvp` continues past a PATH entry it cannot execute and
+finds the real binary anyway, so shadowing bubblewrap away by `PATH` is not
+possible. The `broken` path — the one the CI runner actually produces — is proven
+end to end.
+
+The threshold lives in CI and in this script, and deliberately **not** in
+`vitest.config.ts`: a config file that judges the tests gets edited by the same
+change it would judge. The `quality` job still installs bubblewrap, so the sandbox
+suite is genuinely attempted on the runner rather than quietly skipped; where it
+cannot run, the 384 floor and the printed reason say so instead of the run
+reporting success over a suite that tested nothing.
+
+### 3b. The sandbox capability probe — `probeSandbox`
+
+`sandboxAvailable()` used to ask `bwrap --version`, which a present-but-broken
+bubblewrap answers happily. The probe asks whether a real sandbox can be built, and
+reports one of `ok` / `absent` / `broken`.
+
+`broken` deliberately does **not** reach the `allowUnsandboxed` branch. A boolean
+probe cannot tell `broken` from `absent`, and routing that caller to `runDirectly`
+turns a security boundary into a configuration flag: before the probe, a broken
+bwrap selected bubblewrap and the task failed; with a boolean probe it would run
+unsandboxed. A caller who opted out of isolation on a host with no bubblewrap has
+not opted out of it on a host whose bubblewrap is silently inert. So `broken`
+throws, and says which of the two it is.
+
+**Proven red.** The stub that answers `--version` with exit 0 and fails a real
+sandbox returned `sandboxAvailable() === true` before this change, and
+`resolveSandbox({ allowUnsandboxed: true, binary: <stub> })` returned `runDirectly`
+instead of throwing. Both are now regression tests:
+
+```
+tests/executor.test.ts > the sandbox probe asks whether a sandbox can be made…
+  × refuses to hand the task to the host when bubblewrap is present but broken
+  AssertionError: expected [Function] to throw an error
+```
+
+Green after the change: 5 passed.
+
+**Not memoised, deliberately.** A cached verdict is what this change exists to
+remove. With a cache, a `bwrap` that demonstrably works received a cached `absent`
+and a task was refused for a sandbox that was there — reproducible in the full file
+and not in isolation, consistent with a second copy of the module on disk
+(`packages/cli/dist/executor.js`) holding a different answer. A wrong cached verdict
+on a security predicate is worse than the spawn it saves, and the spawn is once
+per `resolveSandbox`: once per task run, not once per command.
 
 The threshold lives in CI and in this script, and deliberately **not** in
 `vitest.config.ts`: a config file that judges the tests is edited by the same change

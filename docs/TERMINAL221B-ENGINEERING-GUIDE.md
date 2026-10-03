@@ -134,7 +134,7 @@ plus a documented statement of anything that could not be run.
 | Before a release or a push | all of the above, plus the four cargo commands in §2.2 |
 
 **Measured on this tree on 2026-10-02 (re-measured after the Phase 3 executor
-landed, same day):** 20 test files, 385 tests, all passing; `npm run lint`,
+landed, same day):** 20 test files, 390 tests, all passing; `npm run lint`,
 `npm run typecheck` (root and workspace), `npm run lint:shell` and
 `npm run build:cli` clean. The four-file case gate is 232 tests. The four
 cargo commands of §2.2 are clean: `cargo fmt --all -- --check`,

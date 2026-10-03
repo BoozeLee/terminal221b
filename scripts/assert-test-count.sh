@@ -10,8 +10,8 @@
 # Why there are two floors rather than one hard number:
 # the six skipped cases are the ONLY reason the count moves. So the floor is a
 # function of the same capability the tests gate on, probed here by the same code
-# they use. 385 when a sandbox can be built; 379 when it cannot. Anything below
-# 379 is a different problem and fails under every capability.
+# they use. 390 when a sandbox can be built; 384 when it cannot. Anything below
+# 384 is a different problem and fails under every capability.
 #
 # The threshold is here and in CI, deliberately not in vitest.config.ts, because a
 # config file that judges the tests gets edited by the same change it would judge.

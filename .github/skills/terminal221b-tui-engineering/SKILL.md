@@ -40,7 +40,28 @@ description: Develop and review Terminal221b's Rust terminal interface with Rata
    cargo build --workspace --locked
    ```
 
+   `cargo clippy … -D warnings` is no longer a convention here: it is the `rust`
+   job in `.github/workflows/ci.yml`, and it is the one gate three documents in this
+   repository prescribe that no workflow used to run.
+
 7. If dependencies changed, update and verify `Cargo.lock`; otherwise leave it
    unchanged. Do not push, edit PRs, or install host packages unless the task
    explicitly authorizes it.
+
+## Where the sandbox boundary actually lives
+
+The write-set enforcement is **not** in this crate. `bwrapSandbox`,
+`probeSandbox` and `resolveSandbox` are all in `packages/cli/src/executor.ts`, and
+the six tests that prove the write set is enforced rather than described are
+`packages/cli/tests/executor.test.ts`.
+
+Two consequences for TUI work:
+
+- Changing what the sandbox permits is a CLI change, not a TUI change, and it lands
+  in the CLI's own commit.
+- Whether those six tests run at all is a host capability, not a TUI fact. A host
+  with a bubblewrap that cannot unshare the network reports `broken`, the tests
+  skip with the reason printed, and the executed-count floor drops from 390 to 384.
+  `docs/TERMINAL221B-GATES.md` §3 and §3b have the detail. Do not "fix" a skipped
+  sandbox suite by relaxing its assertions.
 
