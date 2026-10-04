@@ -11,6 +11,11 @@
 # Actions minutes are exhausted and CI cannot execute a job at all. The local
 # path is the CI path, so "I could not run it here" stops being true.
 #
+# Every gate below audits the working tree, not a branch and not a ref, so a
+# developer running this and CI running it on the same commit are looking at the
+# same bytes and get the same answer. That equivalence is the property worth
+# having, and it only holds while this file is the only list.
+#
 # Not the repository's test suite. This is the gates, and it does not claim to
 # be more than that -- the two are different jobs and conflating them is how a
 # green run ends up meaning only that the gates did not notice anything.
@@ -27,20 +32,28 @@ cd "$repo_root"
 # self-tests come first: if a gate cannot fail, its audit below proves nothing
 # about the tree, so establish that the instruments work before trusting a
 # reading from them.
+# Every self-test runs before any audit. The reason is the whole reason this
+# file exists: an audit performed by an instrument that cannot fail proves
+# nothing about the tree, so the instruments are checked before a reading from
+# them is believed.
 gate_names=(
   "home-path self-test"
-  "home-path audit"
   "workflow self-test"
+  "meta-gate self-test"
+  "home-path audit"
   "workflow audit"
+  "meta-gate audit"
 )
 # Unquoted on purpose below, so the arguments are words rather than part of the
 # filename. Every entry here is a literal in this file, so there is nothing to
 # split that could be an injection.
 gate_cmds=(
   "scripts/check-home-paths.sh --self-test"
-  "scripts/check-home-paths.sh"
   "scripts/check-workflows-can-fail.sh --self-test"
+  "scripts/check-gates-are-honest.sh --self-test"
+  "scripts/check-home-paths.sh"
   "scripts/check-workflows-can-fail.sh"
+  "scripts/check-gates-are-honest.sh"
 )
 
 if [ "${1:-}" = "--list" ]; then
@@ -62,7 +75,16 @@ for i in "${!gate_names[@]}"; do
   ${gate_cmds[$i]}
   status=$?
   if [ "$status" -ne 0 ]; then
-    printf '  FAILED: %s (exit %s)\n' "$name" "$status" >&2
+    # The exit code's meaning is the whole contract, so it is spelled out here
+    # rather than left as a number. A 2 is not "found a problem", it is "looked
+    # at nothing", and a reader who cannot tell those apart will file the second
+    # as the first and go looking for a bug that is not in the code.
+    case "$status" in
+      1) why="findings" ;;
+      2) why="inconclusive -- nothing was verified" ;;
+      *) why="unexpected exit" ;;
+    esac
+    printf '  FAILED: %s (exit %s -- %s)\n' "$name" "$status" "$why" >&2
     failures=$((failures + 1))
   fi
 done

@@ -19,8 +19,6 @@
 #   check-workflows-can-fail.sh --self-test  prove each check can fail
 set -uo pipefail
 
-DEFAULT_ALLOW='^/home/(USER|example|user)$'
-
 # What a `run:` line is allowed to be and still count as able to fail. A step
 # whose entire body is one of these cannot fail, whatever the repo around it
 # does, so a job made only of them is a decoration.
@@ -88,13 +86,23 @@ job_report() {
   ' trivial_re="$TRIVIAL_RUN" "$1"
 }
 
+# Exit 2 -- inconclusive, not clean. This gate's whole subject is the CI
+# configuration, so a repository with no CI is not a repository that is fine; it
+# is a repository this gate was unable to look at. Reporting that as a pass is
+# the exact shape of bug this file exists to catch, applied to itself.
 audit() {
-  local dir="$1" wf problems=0 checked=0
+  local dir="${1:-.}" min_subjects="${2:-1}" wf problems=0 checked=0
   local -a findings=()
 
+  if [ ! -e "$dir" ]; then
+    echo "$dir: inconclusive -- no such path; nothing was verified, and that is not a pass" >&2
+    return 2
+  fi
   if [ ! -d "$dir/.github/workflows" ]; then
-    echo "ok: $dir has no .github/workflows directory, so there is no workflow that can lie"
-    return 0
+    echo "$dir: inconclusive -- no .github/workflows directory, so there is no CI to audit." >&2
+    echo "  That is a finding, not a pass: a repository with no CI has nothing checking" >&2
+    echo "  it. Pass --min-subjects 0 to opt out deliberately." >&2
+    return 2
   fi
 
   for wf in "$dir"/.github/workflows/*.yml "$dir"/.github/workflows/*.yaml; do
@@ -144,6 +152,12 @@ audit() {
     fi
   done
 
+  if [ "$checked" -lt "$min_subjects" ]; then
+    echo "$dir: inconclusive -- ${checked} workflow file(s) found, expected at least" \
+      "${min_subjects}; nothing was verified, and that is not a pass" >&2
+    return 2
+  fi
+
   if [ "$problems" -ne 0 ]; then
     echo "$dir: ${problems} workflow problem(s) that can report green without verifying:" >&2
     for f in "${findings[@]}"; do echo "  $f" >&2; done
@@ -163,11 +177,23 @@ self_test() {
 
   # Each control writes a workflow that must be REFUSED, and one that must be
   # accepted. A control that only ever proves the happy path is a decorator.
+  # `setup` is optional: without it the fixture gets a workflows directory and a
+  # workflow in it, which is the common case. "no workflows directory" and
+  # "empty workflows directory" are both expressed by passing one, so they cannot
+  # be confused with a fixture that simply has a clean workflow in it.
   control() {
-    local label="$1" want="$2" body="$3"
+    local label="$1" want="$2" body="$3" setup="${4:-with-workflow}"
     local d="$tmp/$label"
-    mkdir -p "$d/.github/workflows"
-    printf '%s\n' "$body" > "$d/.github/workflows/w.yml"
+    case "$setup" in
+      with-workflow)
+        mkdir -p "$d/.github/workflows"
+        printf '%s\n' "$body" > "$d/.github/workflows/w.yml" ;;
+      no-dir)
+        mkdir -p "$d" ;;
+      empty-dir)
+        mkdir -p "$d/.github/workflows" ;;
+      *) echo "self-test FAILED: $label (unknown setup $setup)" >&2; failures=$((failures + 1)); return ;;
+    esac
     audit "$d" >/dev/null 2>&1
     status=$?
     if [ "$status" -ne "$want" ]; then
@@ -246,6 +272,46 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7'
 
+  # The three ways this gate has nothing to look at. A gate whose whole subject
+  # is the CI configuration has to treat its own absence as a finding, and these
+  # are the controls that make that non-vacuous: without the exit-2 paths all
+  # three go red, because the audit would report a sound configuration it never
+  # read.
+  control refuses-no-workflows-dir 2 'name: x' no-dir
+  control refuses-empty-workflows-dir 2 'name: x' empty-dir
+
+  # A path that was never created. Written out rather than folded into the
+  # helper, because the helper always makes a directory for the fixture.
+  audit "$tmp/refuses-missing-path" 1 >/dev/null 2>&1
+  status=$?
+  if [ "$status" -ne 2 ]; then
+    echo "self-test FAILED: refuses-missing-path (wanted exit 2, got $status)" >&2
+    failures=$((failures + 1))
+  else
+    echo "self-test ok: refuses-missing-path (exit $status)"
+  fi
+
+  # The floor, which is what makes "no CI" a finding rather than a pass.
+  mkdir -p "$tmp/min-subjects/.github/workflows"
+  printf '%s\n' "$ok" > "$tmp/min-subjects/.github/workflows/w.yml"
+  audit "$tmp/min-subjects" 3 >/dev/null 2>&1
+  status=$?
+  if [ "$status" -ne 2 ]; then
+    echo "self-test FAILED: min-subjects-floor (wanted exit 2, got $status)" >&2
+    failures=$((failures + 1))
+  else
+    echo "self-test ok: min-subjects-floor (exit $status)"
+  fi
+  # And met, the same tree, so the floor is a floor and not a wall.
+  audit "$tmp/min-subjects" 1 >/dev/null 2>&1
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "self-test FAILED: min-subjects-met (wanted exit 0, got $status)" >&2
+    failures=$((failures + 1))
+  else
+    echo "self-test ok: min-subjects-met (exit $status)"
+  fi
+
   control accepts-a-real-run 0 "$ok"
   control refuses-a-checkout-only-job 1 "$checkout_only"
   control action-plus-run-is-not-vacuous 0 "$(printf '%s\n' "$action_only" | sed 's|      - uses: actions/stale@v9|      - uses: actions/stale@v9\n      - run: ./scripts/verify.sh|')"
@@ -270,8 +336,20 @@ main() {
     self_test
     return $?
   fi
-  local dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-  audit "$dir"
+  local dir="" min_subjects=1
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --min-subjects)
+        [ "$#" -ge 2 ] || { echo "--min-subjects needs a number" >&2; return 2; }
+        min_subjects="$2"; shift 2 ;;
+      --min-subjects=*)
+        min_subjects="${1#*=}"; shift ;;
+      --*) echo "unknown option: $1" >&2; return 2 ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  [ -n "$dir" ] || dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  audit "$dir" "$min_subjects"
 }
 
 main "$@"
