@@ -76,9 +76,40 @@ build_allow() {
   printf '%s' "$allow"
 }
 
+# Exit 2 -- inconclusive, not clean. A gate that cannot enumerate its subjects
+# must not report 0: `scan` below captures stdout only, so when `git ls-files`
+# fails it yields nothing and the audit would otherwise announce a tree it never
+# looked at. Absence of evidence is not evidence of absence, and in a CI log the
+# two are the same line.
+#
+# The three cases are separated deliberately rather than folded into one test,
+# because they are different mistakes and the operator needs to know which one
+# they are looking at: a path that is not there, a directory that is not a
+# repository, and a repository with nothing tracked in it.
+refuse_to_look() {
+  local dir="$1" what="$2"
+  echo "$dir: inconclusive -- $what; nothing was verified, and that is not a pass" >&2
+  return 2
+}
+
+preconditions() {
+  local dir="$1" tracked
+  [ -d "$dir" ] || refuse_to_look "$dir" "not a directory"
+  [ "$?" -eq 0 ] || return 2
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 \
+    || refuse_to_look "$dir" "not inside a git work tree"
+  [ "$?" -eq 0 ] || return 2
+  tracked="$(git -C "$dir" ls-files -z 2>/dev/null | tr -cd '\000' | wc -c)"
+  [ "$tracked" -gt 0 ] \
+    || refuse_to_look "$dir" "a git work tree with no tracked files, so there is nothing to scan"
+  [ "$?" -eq 0 ] || return 2
+  return 0
+}
+
 audit() {
   local dir="$1" allow="$2"
   local hits
+  preconditions "$dir" || return 2
   hits="$(scan "$dir" "$allow")"
   if [ -n "$hits" ]; then
     echo "$dir: refusing to publish a real home directory:" >&2
@@ -153,6 +184,40 @@ self_test() {
       echo "self-test ok: $label (exit $status)"
     fi
   }
+
+  # The three ways a gate can look at nothing. These are the controls that make
+  # the exit-2 path non-vacuous: delete `preconditions` and every one of them
+  # goes red, because the audit would report a clean tree it never scanned.
+  look_control() {
+    local label="$1" want="$2" setup="$3" status
+    mkdir -p "$tmp/$label"
+    ( cd "$tmp/$label" && eval "$setup" )
+    audit "$tmp/$label" "$DEFAULT_ALLOW" >/dev/null 2>&1
+    status=$?
+    if [ "$status" -ne "$want" ]; then
+      echo "self-test FAILED: $label (wanted exit $want, got $status)" >&2
+      failures=$((failures + 1))
+    else
+      echo "self-test ok: $label (exit $status)"
+    fi
+  }
+
+  look_control unlookable-not-a-repo 2 'true'
+  look_control unlookable-no-tracked-files 2 'git init -q .'
+
+  # The third way of not looking needs no fixture at all, which is why it is
+  # written out rather than folded into the helper: the subject is a path that
+  # was never created. Creating a directory and then removing it would make the
+  # control depend on how this host implements `rm`, which is exactly the kind of
+  # incidental coupling a control must not have.
+  audit "$tmp/unlookable-missing-path" "$DEFAULT_ALLOW" >/dev/null 2>&1
+  status=$?
+  if [ "$status" -ne 2 ]; then
+    echo "self-test FAILED: unlookable-missing-path (wanted exit 2, got $status)" >&2
+    failures=$((failures + 1))
+  else
+    echo "self-test ok: unlookable-missing-path (exit $status)"
+  fi
 
   # Built at runtime, not written out: once this script is tracked it is itself
   # scanned, so a literal here would make the gate fail on its own canary.

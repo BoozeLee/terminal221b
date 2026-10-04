@@ -1,0 +1,21 @@
+# Gates that must distinguish clean, findings, and inconclusive.
+#
+# check-gates-are-honest.sh drives every gate listed here against three fixtures
+# and requires it to be distinguished across all three: exit 0 on a clean
+# subject, exit 1 on one with a real problem, exit 2 on one it cannot look at.
+#
+#   <subject-kind> <gate-command>
+#
+# The subject kind selects a fixture builder, and a kind with no builder is a
+# finding rather than something to skip. Adding a gate means choosing one, which
+# means answering "what does this look at, and what does it look like when there
+# is nothing?" -- the question that produces the bug this file exists to catch.
+#
+# Kinds available today:
+#   git-tree       the gate audits a git work tree          (empty = nothing tracked)
+#   workflow-dir   the gate audits a .github/workflows tree (empty = no workflows)
+#
+# Paths are relative to the repository root, and the gate must be executable.
+
+git-tree       scripts/check-home-paths.sh
+workflow-dir   scripts/check-workflows-can-fail.sh
