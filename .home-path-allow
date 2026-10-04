@@ -1,0 +1,12 @@
+# Paths under /home/ that are NOT somebody's home directory.
+#
+# scripts/check-home-paths.sh refuses to publish a real home directory. Each
+# entry here is an exemption, and every exemption needs a reason, because an
+# unexplained entry is indistinguishable from an oversight.
+#
+# Format: one absolute path per line; blank lines and # comments ignored.
+
+# Test fixture, not a host. packages/cli/tests/dossier.test.ts:74 sets this as
+# the storeRoot it resolves, and line 77 asserts the resolved value comes back
+# unchanged. It stands for "some user's data directory" and names nobody.
+/home/operator
