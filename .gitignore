@@ -31,3 +31,6 @@ coverage/
 # content: a task worktree is a throwaway checkout, and a candidate diff is
 # unapproved output that must never be committed by accident.
 .terminal221b/
+
+# vitest cache directory
+.vitest/
