@@ -35,7 +35,7 @@ matches, not as a silent behaviour change in one repository.
 |---|---|---|
 | `scripts/check-home-paths.sh` | `09997aab74a0403710d5bfa0e7cfd495` | 271 |
 | `scripts/check-workflows-can-fail.sh` | `631ef2b98019f609062def0f1ed7d58a` | 355 |
-| `scripts/check-gates-are-honest.sh` | `fce2004a55902af2eb1569e2a6bffdbe` | 966 |
+| `scripts/check-gates-are-honest.sh` | `1bc58cf2417e55833bd8be54fff6d565` | 979 |
 | `scripts/verify-gates.sh` | `a24889538e2ba985d2527597c1bdd399` | 97 |
 
 `.gate-manifest` is deliberately **not** in that table. It names the gates of the
@@ -78,7 +78,7 @@ a reading from them is believed.
 ## What the controls are for
 
 `check-home-paths.sh` 10 controls, `check-workflows-can-fail.sh` 14,
-`check-gates-are-honest.sh` 20 — **44 in total, 33 of which assert a refusal.**
+`check-gates-are-honest.sh` 20 — **44 in total, 32 of which assert a refusal.**
 
 That asymmetry is the point. A control set that only ever proves the happy path
 is a decorator, not a gate. Every gate's self-test includes a control that

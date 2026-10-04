@@ -209,9 +209,22 @@ fixture_clean_skill_tree() {
 
 fixture_dirty_skill_tree() {
   local d="$1"
-  mkdir -p "$d/skills/broken"
-  # No frontmatter at all: the defect every SKILL.md loader refuses, and one
-  # that needs no pattern knowledge to construct.
+  # One defect of each class a skill gate might own, for the same reason the
+  # git-tree dirty fixture carries a home path, a secret and a host path: two
+  # gates can share this kind and still disagree about what a finding is. The
+  # frontmatter gate looks at the *content* of a SKILL.md; the roots gate looks
+  # at whether one *name* is reachable from two roots. A fixture holding only a
+  # malformed skill satisfies the first and reports 0 for the second, and the
+  # auditor would refuse a gate that is behaving correctly.
+  #
+  # The duplicated name is planted under two roots the roots gate actually
+  # inspects, not under arbitrary directories, so the fixture is a real
+  # duplicate for a gate configured the way this repository configures it.
+  mkdir -p "$d/skills/alpha" "$d/plugins/elohim/skills/alpha" "$d/skills/broken"
+  _well_formed_skill > "$d/skills/alpha/SKILL.md"
+  _well_formed_skill > "$d/plugins/elohim/skills/alpha/SKILL.md"
+  # No frontmatter block at all: the defect every SKILL.md loader refuses, and
+  # one that needs no pattern knowledge to construct.
   printf '# Broken\n\nA skill with no frontmatter block at all.\n' \
     > "$d/skills/broken/SKILL.md"
 }
