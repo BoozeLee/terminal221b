@@ -35,7 +35,7 @@ matches, not as a silent behaviour change in one repository.
 |---|---|---|
 | `scripts/check-home-paths.sh` | `09997aab74a0403710d5bfa0e7cfd495` | 271 |
 | `scripts/check-workflows-can-fail.sh` | `631ef2b98019f609062def0f1ed7d58a` | 355 |
-| `scripts/check-gates-are-honest.sh` | `6283dd184836a9529d93a56fe6ba48f2` | 771 |
+| `scripts/check-gates-are-honest.sh` | `fce2004a55902af2eb1569e2a6bffdbe` | 966 |
 | `scripts/verify-gates.sh` | `a24889538e2ba985d2527597c1bdd399` | 97 |
 
 `.gate-manifest` is deliberately **not** in that table. It names the gates of the
@@ -78,7 +78,7 @@ a reading from them is believed.
 ## What the controls are for
 
 `check-home-paths.sh` 10 controls, `check-workflows-can-fail.sh` 14,
-`check-gates-are-honest.sh` 15 — **39 in total, 28 of which assert a refusal.**
+`check-gates-are-honest.sh` 20 — **44 in total, 33 of which assert a refusal.**
 
 That asymmetry is the point. A control set that only ever proves the happy path
 is a decorator, not a gate. Every gate's self-test includes a control that
@@ -100,6 +100,40 @@ load-bearing by removing the guard and watching them go red.
 
 A control that cannot fail is a gate that cannot fail, which is the whole problem
 one level up.
+
+## Auditing a gate that finds its own root
+
+Two of the subject kinds needed more than a path argument.
+
+A gate like elohim's `verify_skill_roots.py` resolves its repository from
+`Path(__file__).parent.parent`. Given a fixture path it ignores the argument,
+audits the real repository, and answers 0 — a clean verdict about a tree it never
+looked at, which is the exact failure this file exists to refuse. So there is a
+third invocation mode:
+
+    <subject-kind> <invocation> <argv…>
+
+    path        the fixture is appended as the last argument (default)
+    cwd         the gate runs with its working directory set to the fixture
+    relocated   the gate is copied into the fixture and run from there
+
+`relocated` is the one that matters, and it has a limit worth stating: the gate's
+own dependencies are its problem. A gate that imports a sibling module cannot be
+relocated without it, and finding that out here is better than finding it out in a
+CI log.
+
+The `skill-tree` kind exists alongside it. Its subject is a `skills/` directory of
+`SKILL.md` files rather than a work tree, and its unlookable fixture is a
+directory that **exists and holds nothing** — not an absent one, because a gate
+that handles "no directory" but not "directory with nothing in it" is the common
+half-finished case and the fixture has to be able to tell those apart.
+
+Its five controls include the defect measured in miniature in elohim: a skill gate
+right about a real finding, right about a good skill, and answering 0 when it has
+no skills to look at. Making that fixture honest turns the control red, which is
+what makes the control worth having — during this work four of the five were
+briefly green because their fixture directory was never created, and the gate was
+absent rather than blind.
 
 The defect that recurred most often, and is the reason `check-gates-are-honest.sh`
 exists at all: a gate pointed at an empty repository, a directory that is not a

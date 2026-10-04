@@ -147,18 +147,91 @@ fixture_unlookable_workflow_dir() {
 # and stderr are discarded: this file judges the exit code, and printing a
 # gate's findings here would be reporting a second opinion it never asked for.
 run_gate() {
-  local gate="$1" dir="$2"
-  "$gate" "$dir" >/dev/null 2>&1
+  local gate="$1" dir="$2" mode="${3:-path}"
+  case "$mode" in
+    path)
+      "$gate" "$dir" >/dev/null 2>&1 ;;
+    cwd)
+      # The fixture is appended to the manifest's argv, not injected as an
+      # argument here, so this only changes where the gate is standing.
+      ( cd "$dir" && "$gate" ) >/dev/null 2>&1 ;;
+    relocated)
+      # A gate that resolves its own repository from its own path cannot be
+      # pointed at a fixture with an argument -- it would go on auditing the real
+      # repository and answer 0 for a tree it never looked at, which is the exact
+      # false green this file exists to refuse. So it is copied into the fixture
+      # and run from there, and `dir` stands in for the repository it will
+      # resolve. The gate's own dependencies are its problem: a gate that needs a
+      # sibling module cannot be relocated without it, and finding that out here
+      # is better than finding it out in a CI log.
+      ( mkdir -p "$dir/tools" && cp "$gate" "$dir/tools/$(basename "$gate")" \
+        && cd "$dir" && python3 "tools/$(basename "$gate")" ) >/dev/null 2>&1 ;;
+    *)
+      echo "unknown invocation mode: $mode" >&2; return 127 ;;
+  esac
   echo $?
 }
 
 # Echo the three fixture builders for a kind, or nothing if the kind is unknown.
+# A skill tree: a `skills/` directory holding SKILL.md files. Separate from
+# git-tree because the subject is the skills, not the work tree, and because the
+# empty case is a directory that exists and holds nothing -- which is the case a
+# skill gate is most likely to answer "clean" to.
+#
+# The three states, and the unlookable one is the point:
+#   clean        one well-formed skill
+#   dirty        one skill a loader would reject
+#   unlookable   skills/ present and empty: no SKILL.md anywhere
+#
+# A gate that roots itself at its own location (`Path(__file__).parent.parent`)
+# cannot be driven with a path argument at all, so this kind is only usable with
+# the `relocated` invocation. That is the whole reason that mode exists.
+_well_formed_skill() {
+  cat <<'MD'
+---
+name: well-formed
+description: Use when a gate needs one skill a loader would accept, nothing else.
+license: MIT
+---
+
+# Well formed
+
+A body that is long enough to be a real skill and carries nothing a loader
+would object to.
+MD
+}
+
+fixture_clean_skill_tree() {
+  local d="$1"
+  mkdir -p "$d/skills/well-formed"
+  _well_formed_skill > "$d/skills/well-formed/SKILL.md"
+}
+
+fixture_dirty_skill_tree() {
+  local d="$1"
+  mkdir -p "$d/skills/broken"
+  # No frontmatter at all: the defect every SKILL.md loader refuses, and one
+  # that needs no pattern knowledge to construct.
+  printf '# Broken\n\nA skill with no frontmatter block at all.\n' \
+    > "$d/skills/broken/SKILL.md"
+}
+
+fixture_unlookable_skill_tree() {
+  local d="$1"
+  # Present and empty. Not absent: a gate that handles "no directory" but not
+  # "directory with nothing in it" is the common half-finished case, and the
+  # fixture has to be able to tell the two apart to catch it.
+  mkdir -p "$d/skills"
+}
+
 builders_for() {
   case "$1" in
     git-tree)
       echo "fixture_clean_git_tree fixture_dirty_git_tree fixture_unlookable_git_tree" ;;
     workflow-dir)
       echo "fixture_clean_workflow_dir fixture_dirty_workflow_dir fixture_unlookable_workflow_dir" ;;
+    skill-tree)
+      echo "fixture_clean_skill_tree fixture_dirty_skill_tree fixture_unlookable_skill_tree" ;;
     *) return 1 ;;
   esac
 }
@@ -269,9 +342,9 @@ audit() {
     "$db" "$base/dirty"
     "$ub" "$base/unlookable"
 
-    c="$(run_gate "$dir/$gate" "$base/clean")"
-    d="$(run_gate "$dir/$gate" "$base/dirty")"
-    u="$(run_gate "$dir/$gate" "$base/unlookable")"
+    c="$(run_gate "$dir/$gate" "$base/clean" "$invocation")"
+    d="$(run_gate "$dir/$gate" "$base/dirty" "$invocation")"
+    u="$(run_gate "$dir/$gate" "$base/unlookable" "$invocation")"
 
     if ! verdict "$gate" "$c" "$d" "$u"; then
       problems=$((problems + 1))
@@ -501,17 +574,28 @@ WIRING
   # every call above it a "command not found" -- one that writes to stderr, does
   # nothing, and leaves the fixture unwired while the control below still reports
   # what it wants to hear. Takes a list, so a control can register two gates.
+  # `wiring_repo` rather than a parameter, so the controls below that build a
+  # second fixture repository can point this at it. A hard-wired $repo left that
+  # fixture with no runner at all, and every control in it reported exit 2 --
+  # "inconclusive" -- which reads as a broken control rather than a broken
+  # fixture, and would have been easy to mistake for the audit being right.
+  local wiring_repo="$repo"
+  # A gate is not always under scripts/. The Python skill gates live in tools/,
+  # and a hard-coded prefix made the runner list a path the manifest never named
+  # -- so the forward check reported a missing entry and every skill control
+  # turned red for a wiring reason rather than a gate reason.
+  local wiring_prefix='scripts/'
   write_wiring() {
-    cat > "$repo/scripts/verify-gates.sh" <<WIRING
+    cat > "$wiring_repo/scripts/verify-gates.sh" <<WIRING
 #!/usr/bin/env bash
 gate_cmds=(
   "scripts/$META_NAME --self-test"
 WIRING
     local g
     for g in "$@"; do
-      printf '  "scripts/%s"\n' "$g" >> "$repo/scripts/verify-gates.sh"
+      printf '  "%s%s"\n' "$wiring_prefix" "$g" >> "$wiring_repo/scripts/verify-gates.sh"
     done
-    printf ')\n' >> "$repo/scripts/verify-gates.sh"
+    printf ')\n' >> "$wiring_repo/scripts/verify-gates.sh"
   }
   write_wiring honest-gate.sh
 
@@ -679,6 +763,117 @@ WIRING
   else
     echo "self-test ok: refuses-a-makefile-repo-whose-ci-drops-it (exit $status)"
   fi
+
+  # The `skill-tree` kind and the `relocated` invocation, which exist for a gate
+  # that resolves its own repository from its own file path. Python, in tools/,
+  # driven by being copied into the fixture rather than by an argument.
+  local sr="$tmp/skill-repo"
+  mkdir -p "$sr/scripts" "$sr/tools" "$sr/.github/workflows"
+  cp "${BASH_SOURCE[0]}" "$sr/scripts/$META_NAME"
+  chmod +x "$sr/scripts/$META_NAME"
+
+  # Honest on all three: one good skill, one a loader rejects, none at all.
+  cat > "$sr/tools_probe.py" <<'PYGATE'
+#!/usr/bin/env python3
+"""Refuse a SKILL.md a loader would reject. Resolves its own root from __file__."""
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+skills = REPO / "skills"
+if not skills.is_dir():
+    print("no skills directory", file=sys.stderr)
+    sys.exit(2)
+found = sorted(skills.rglob("SKILL.md"))
+if not found:
+    # The case this whole family exists for: no subjects is not a clean tree.
+    print("no SKILL.md under skills/", file=sys.stderr)
+    sys.exit(2)
+for skill in found:
+    text = skill.read_text(encoding="utf-8", errors="replace")
+    if not text.startswith("---"):
+        print(f"  {skill}: no frontmatter", file=sys.stderr)
+        sys.exit(1)
+sys.exit(0)
+PYGATE
+  # The defect measured in elohim, in miniature: a skill gate that reports a
+  # clean tree when it has no skills to look at. It is right about a real
+  # finding and about a good skill, and wrong only about the case that reads as
+  # a pass -- which is why it needs its own control rather than the
+  # always-passes one.
+  cat > "$sr/tools_blind.py" <<'PYGATE'
+#!/usr/bin/env python3
+"""Right about findings, wrong about having nothing to look at."""
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+for skill in sorted((REPO / "skills").rglob("SKILL.md")):
+    if not skill.read_text(encoding="utf-8", errors="replace").startswith("---"):
+        sys.exit(1)
+sys.exit(0)
+PYGATE
+  cat > "$sr/tools_always_two.py" <<'PYGATE'
+#!/usr/bin/env python3
+import sys
+sys.exit(2)
+PYGATE
+  mkdir -p "$sr/tools"
+  mv "$sr/tools_probe.py" "$sr/tools/probe-gate.py"
+  mv "$sr/tools_blind.py" "$sr/tools/blind-gate.py"
+  mv "$sr/tools_always_two.py" "$sr/tools/always-two.py"
+  # Executable, because the audit refuses a registered gate that is not present
+  # and executable at its path -- and a Python gate is a gate.
+  chmod +x "$sr/tools/"*.py
+  cat > "$sr/.github/workflows/gates.yml" <<'WIRING'
+name: Gates
+on:
+  push:
+jobs:
+  gates:
+    steps:
+      - run: ./scripts/verify-gates.sh
+WIRING
+  skill_control() {
+    local label="$1" want="$2" line="$3" gate="$4"
+    printf '%s\n' "$line" > "$sr/$MANIFEST_NAME"
+    wiring_repo="$sr"
+    wiring_prefix='tools/'  # the skill gates are not under scripts/
+    write_wiring "$gate"
+    wiring_repo="$repo"
+    wiring_prefix='scripts/'
+    audit "$sr" >/dev/null 2>&1
+    status=$?
+    if [ "$status" -ne "$want" ]; then
+      echo "self-test FAILED: $label (wanted exit $want, got $status)" >&2
+      failures=$((failures + 1))
+    else
+      echo "self-test ok: $label (exit $status)"
+    fi
+  }
+  skill_control accepts-an-honest-skill-gate 0 \
+    'skill-tree relocated tools/probe-gate.py' probe-gate.py
+  skill_control refuses-a-skill-gate-that-is-blind-to-an-empty-tree 1 \
+    'skill-tree relocated tools/blind-gate.py' blind-gate.py
+  skill_control refuses-a-skill-gate-that-always-refuses 1 \
+    'skill-tree relocated tools/always-two.py' always-two.py
+  # The relocated mode with a gate that audits nothing: it resolves its own
+  # root, finds no skills, and answers 0. Written before the control that
+  # drives it, because a control naming a file that does not exist yet is
+  # testing the presence check rather than the gate.
+  cat > "$sr/tools/ignores-args.py" <<'PYGATE'
+#!/usr/bin/env python3
+"""Resolves a root, looks at nothing, and reports a clean tree."""
+import sys
+sys.exit(0)
+PYGATE
+  chmod +x "$sr/tools/ignores-args.py"
+  skill_control refuses-a-relocated-gate-that-audits-nothing 1 \
+    'skill-tree relocated tools/ignores-args.py' ignores-args.py
+  # And a gate driven the old way -- given a path it ignores -- is still caught,
+  # because the mode is declared and the audit follows the declaration.
+  skill_control refuses-an-unknown-invocation-mode 1 \
+    'skill-tree teleport tools/probe-gate.py' probe-gate.py
 
   # The checksum table in docs/gates.md. A document that claims a copy matches
   # when it does not is the failure this file is about, one level up: the copies
