@@ -212,7 +212,7 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
 - `npm audit --omit=dev` reports unresolved advisories in the dependency tree, including critical and high severity findings. Major Expo upgrades were not applied automatically.
-- The repository retains its proprietary license; it is not MIT-licensed.
+- The repository is licensed under AGPL-3.0, which is not a permissive license like MIT. See LICENSE for details.
 
 ## Roadmap
 
@@ -234,7 +234,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks.
 
 ## License
 
-The repository is distributed under the terms in [LICENSE](LICENSE). The license is proprietary; do not redistribute or reuse it without permission.
+The repository is distributed under the terms in [LICENSE](LICENSE). The license is AGPL-3.0; network use requires source disclosure. See LICENSE for full terms.
 
 ## Security
 
