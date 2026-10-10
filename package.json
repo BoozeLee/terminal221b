@@ -15,7 +15,8 @@
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",
-    "build": "expo export --platform web"
+    "build": "expo export --platform web",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\""
   },
   "workspaces": [
     "packages/cli"
@@ -39,6 +40,7 @@
     "@typescript-eslint/eslint-plugin": "^8.71.0",
     "@typescript-eslint/parser": "^8.71.0",
     "eslint": "^10.11.0",
+    "prettier": "3.9.9",
     "typescript": "~5.9.2",
     "vitest": "^5.0.2"
   },
