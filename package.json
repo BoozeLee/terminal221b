@@ -46,11 +46,14 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BoozeLee/terminal221b.git"
+    "url": "https://github.com/Quattro-Commas/terminal221b.git"
   },
-  "homepage": "https://github.com/BoozeLee/terminal221b",
+  "homepage": "https://github.com/Quattro-Commas/terminal221b",
   "bugs": {
-    "url": "https://github.com/BoozeLee/terminal221b/issues"
+    "url": "https://github.com/Quattro-Commas/terminal221b/issues"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "overrides": {
     "postcss": "8.5.28",
