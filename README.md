@@ -199,7 +199,7 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 /tmp/terminal221b-prefix/bin/terminal221b --help
 ```
 
-For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
+For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is distributed under AGPL-3.0; see LICENSE for network-source disclosure requirements.
 
 The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute model-directed tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers. Crypto ideas and project analysis can be discussed with the existing chat prompt, but the CLI does not trade NFTs/tokens, manage wallets, or submit bounty reports.
 
@@ -212,7 +212,7 @@ The CLI currently supports one Anthropic provider and one-shot prompts. It does 
 - This is a client app that sends the user-provided key directly to Anthropic; it is not suitable for embedding an operator-owned key in a distributed build.
 - The web export and TypeScript checks pass locally, but no simulator/device session or live Anthropic request has been verified.
 - `npm audit --omit=dev` reports unresolved advisories in the dependency tree, including critical and high severity findings. Major Expo upgrades were not applied automatically.
-- The repository retains its proprietary license; it is not MIT-licensed.
+- The repository is licensed under AGPL-3.0, which is not a permissive license like MIT. See LICENSE for details.
 
 ## Roadmap
 
@@ -234,7 +234,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks.
 
 ## License
 
-The repository is distributed under the terms in [LICENSE](LICENSE). The license is proprietary; do not redistribute or reuse it without permission.
+The repository is distributed under the terms in [LICENSE](LICENSE). The license is AGPL-3.0; network use requires source disclosure. See LICENSE for full terms.
 
 ## Security
 
