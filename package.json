@@ -15,7 +15,8 @@
     "lint": "eslint App.tsx index.ts src packages/cli/src packages/cli/tests",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @terminal221b/cli",
-    "build": "expo export --platform web"
+    "build": "expo export --platform web",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\""
   },
   "workspaces": [
     "packages/cli"
@@ -39,6 +40,7 @@
     "@typescript-eslint/eslint-plugin": "^8.71.0",
     "@typescript-eslint/parser": "^8.71.0",
     "eslint": "^10.11.0",
+    "prettier": "3.9.9",
     "typescript": "~5.9.2",
     "vitest": "^5.0.2"
   },
@@ -46,11 +48,14 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BoozeLee/terminal221b.git"
+    "url": "https://github.com/Quattro-Commas/terminal221b.git"
   },
-  "homepage": "https://github.com/BoozeLee/terminal221b",
+  "homepage": "https://github.com/Quattro-Commas/terminal221b",
   "bugs": {
-    "url": "https://github.com/BoozeLee/terminal221b/issues"
+    "url": "https://github.com/Quattro-Commas/terminal221b/issues"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "overrides": {
     "postcss": "8.5.28",
