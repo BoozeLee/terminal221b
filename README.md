@@ -199,7 +199,7 @@ npm install --global --prefix /tmp/terminal221b-prefix /tmp/terminal221b-cli-0.1
 /tmp/terminal221b-prefix/bin/terminal221b --help
 ```
 
-For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is marked private and unlicensed for redistribution under the repository's existing proprietary terms.
+For normal use, install into a user-writable prefix and add that prefix's `bin` directory to `PATH`. The package is distributed under AGPL-3.0; see LICENSE for network-source disclosure requirements.
 
 The CLI currently supports one Anthropic provider and one-shot prompts. It does not execute model-directed tools, maintain multi-turn sessions, call external bounty targets, run Solana transactions, or replace dedicated security analyzers. Crypto ideas and project analysis can be discussed with the existing chat prompt, but the CLI does not trade NFTs/tokens, manage wallets, or submit bounty reports.
 
